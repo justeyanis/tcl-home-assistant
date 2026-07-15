@@ -1,0 +1,64 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Compte data.grandlyon.com",
+        "description": "Identifiants de votre compte data.grandlyon.com (gratuit). Les données temps réel TCL nécessitent une authentification.",
+        "data": {
+          "username": "Identifiant (e-mail)",
+          "password": "Mot de passe"
+        }
+      },
+      "mode": {
+        "title": "Mode de transport",
+        "data": { "mode": "Mode" }
+      },
+      "line": {
+        "title": "Ligne",
+        "data": { "line": "Ligne" }
+      },
+      "station": {
+        "title": "Station / arrêt",
+        "data": { "station": "Station" }
+      },
+      "direction": {
+        "title": "Direction",
+        "description": "Directions observées en ce moment sur cet arrêt. Si la liste est vide (la nuit par exemple), choisissez « Toutes les directions ».",
+        "data": {
+          "direction": "Direction",
+          "departure_count": "Nombre de départs (entités créées)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Identifiants invalides",
+      "cannot_connect": "Impossible de contacter data.grandlyon.com",
+      "no_lines": "Aucune ligne trouvée pour ce mode",
+      "no_stations": "Aucune station trouvée pour cette ligne"
+    },
+    "abort": {
+      "already_configured": "Cette ligne/station/direction est déjà configurée"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options TCL",
+        "data": {
+          "scan_interval": "Intervalle de rafraîchissement (secondes)",
+          "departure_count": "Nombre de départs (entités créées)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "mode": {
+      "options": {
+        "metro": "Métro",
+        "funiculaire": "Funiculaire",
+        "tram": "Tramway",
+        "bus": "Bus"
+      }
+    }
+  }
+}

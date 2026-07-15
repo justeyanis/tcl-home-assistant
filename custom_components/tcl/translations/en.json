@@ -1,0 +1,70 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "data.grandlyon.com account",
+        "description": "Credentials for your free data.grandlyon.com account. TCL real-time data requires authentication.",
+        "data": {
+          "username": "Username (e-mail)",
+          "password": "Password"
+        }
+      },
+      "mode": {
+        "title": "Transport mode",
+        "data": {
+          "mode": "Mode"
+        }
+      },
+      "line": {
+        "title": "Line",
+        "data": {
+          "line": "Line"
+        }
+      },
+      "station": {
+        "title": "Station / stop",
+        "data": {
+          "station": "Station"
+        }
+      },
+      "direction": {
+        "title": "Direction",
+        "description": "Directions currently observed at this stop. If empty (at night), pick \"All directions\".",
+        "data": {
+          "direction": "Direction",
+          "departure_count": "Number of departures (entities created)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials",
+      "cannot_connect": "Cannot reach data.grandlyon.com",
+      "no_lines": "No line found for this mode",
+      "no_stations": "No station found for this line"
+    },
+    "abort": {
+      "already_configured": "This line/station/direction is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TCL options",
+        "data": {
+          "scan_interval": "Refresh interval (seconds)",
+          "departure_count": "Number of departures (entities created)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "mode": {
+      "options": {
+        "metro": "Metro",
+        "funiculaire": "Funicular",
+        "tram": "Tram",
+        "bus": "Bus"
+      }
+    }
+  }
+}

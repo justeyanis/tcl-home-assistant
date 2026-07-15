@@ -1,0 +1,60 @@
+# Panneau BIV métro/funiculaire "façon SAINT-JUST" en YAML pur (Jinja + HTML)
+# --------------------------------------------------------------------------
+# Ne nécessite PAS la carte JS tcl-biv-card, mais requiert la carte HACS
+# "html-template-card" (https://github.com/PiotrMachowski/Home-Assistant-Lovelace-HTML-Jinja2-Template-card)
+# Ressources > Ajouter > /hacsfiles/html-template-card/html-template-card.js
+#
+# Remplacez la valeur de `entity` par votre sensor #0 (celui qui porte
+# l'attribut `departures` et `tcl_biv: true`).
+
+type: custom:html-template-card
+ignore_line_breaks: true
+content: |
+  {%- set entity = 'sensor.tcl_f1_vieux_lyon_cat_st_jean_saint_just_0' -%}
+  {%- set deps    = state_attr(entity, 'departures') or [] -%}
+  {%- set count   = 2 -%}                      {# nb de départs affichés #}
+  {%- set labels  = ['Prochain', 'Suivant'] -%}
+  {%- set header  = 'SAINT-JUST' -%}           {# ou: state_attr(entity,'direction') #}
+  {%- set via     = 'par Minimes\nThéâtres romains' -%}
+
+  <div style="font-family:'DejaVu Sans Mono',monospace;max-width:640px;
+              border-radius:8px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.4);
+              line-height:1.1;">
+
+    <!-- Bandeau jaune -->
+    <div style="display:flex;align-items:center;gap:12px;padding:9px 16px;color:#111;
+                background:linear-gradient(#f6c915,#efb600);">
+      <span style="flex:0 0 auto;width:36px;height:36px;border-radius:50%;
+                   background:#2f9e5b;display:flex;align-items:center;justify-content:center;">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff">
+          <path d="M4 15c0-3 2-5 8-5s8 2 8 5v1a2 2 0 0 1-2 2h-1l1 2h-2l-1-2H7l-1 2H4l1-2H5a2 2 0 0 1-1-2v-1zm3 .5a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4zm10 0a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4zM9 9l9-2 .3 1.6L9.3 10.6 9 9z"/>
+        </svg>
+      </span>
+      <span style="flex:1 1 auto;white-space:nowrap;">
+        <span style="font-size:16px;">Direction</span>
+        <span style="font-size:30px;font-weight:800;letter-spacing:.5px;"> {{ header|upper }}</span>
+      </span>
+      <span style="flex:0 0 auto;font-size:13px;text-align:right;white-space:pre-line;">{{ via }}</span>
+    </div>
+
+    <!-- Écran noir -->
+    <div style="display:flex;align-items:center;gap:22px;padding:14px 18px;background:#060606;">
+      <span style="font-size:42px;font-weight:800;color:#39e639;
+                   text-shadow:0 0 8px rgba(57,230,57,.6);">
+        {{ now().strftime('%H:%M') }}
+      </span>
+      <div style="flex:1;color:#ff7a1a;text-shadow:0 0 6px rgba(255,122,26,.5);">
+        {%- if deps -%}
+          {%- for d in deps[:count] -%}
+            {%- set label = labels[loop.index0] if loop.index0 < labels|length else labels[-1] -%}
+            <div style="font-size:28px;font-weight:700;display:flex;">
+              <span style="display:inline-block;min-width:170px;">{{ label }}</span>
+              <span>: {{ d.delai_texte }}</span>
+            </div>
+          {%- endfor -%}
+        {%- else -%}
+          <div style="font-size:26px;font-weight:700;color:#c8560f;">Aucun départ</div>
+        {%- endif -%}
+      </div>
+    </div>
+  </div>

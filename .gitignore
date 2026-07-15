@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Éditeurs / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Outils de développement Claude Code (local, non versionné)
+.claude/
+
+# Fichiers temporaires / bancs d'essai
+*.log
+*.tmp
+tcl_gtfs.zip
+diagnose_output.txt
