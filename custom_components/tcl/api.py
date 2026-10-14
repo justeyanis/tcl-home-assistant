@@ -39,7 +39,13 @@ ALERT_TYPE_RANK = {
 
 def alert_level(alert: dict) -> int:
     """Gravité d'une alerte (type inconnu = 1, comme des travaux)."""
-    return ALERT_TYPE_RANK.get(str(alert.get("type") or "").strip().lower(), 1)
+    # Les types varient (« Information ligne », « Perturbation majeure »…) :
+    # on compare par préfixe, du plus précis au plus général.
+    kind = str(alert.get("type") or "").strip().lower()
+    for name, rank in sorted(ALERT_TYPE_RANK.items(), key=lambda i: -len(i[0])):
+        if kind.startswith(name):
+            return rank
+    return 1
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; HomeAssistant-TCL/1.0)",
     "Accept": "application/json",
