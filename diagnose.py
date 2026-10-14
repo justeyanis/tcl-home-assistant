@@ -9,7 +9,9 @@ Le script demande vos identifiants data.grandlyon.com (jamais stockés) et :
   1. cherche la station dans le dataset public des arrêts ;
   2. interroge le temps réel (tclpassagearret) pour ces arrêts ;
   3. affiche les passages bruts et évalue votre filtre de direction ;
-  4. vérifie l'accès au GTFS théorique.
+  4. vérifie l'accès au GTFS théorique ;
+  5. interroge le temps réel étendu SIRI (estimated-timetables) de la ligne ;
+  6. liste les alertes trafic de la ligne.
 
 Aucune dépendance : uniquement la bibliothèque standard Python 3.9+.
 """
@@ -26,6 +28,7 @@ import urllib.parse
 import urllib.request
 
 BASE = "https://data.grandlyon.com/fr/datapusher/ws/rdata"
+SIRI_ET_URL = "https://data.grandlyon.com/siri-lite/2.0/estimated-timetables.json"
 GTFS_URL = (
     "https://download.data.grandlyon.com/files/rdata/"
     "tcl_sytral.tcltheorique/GTFS_TCL.ZIP"
@@ -170,6 +173,78 @@ def main() -> int:
             print(f"   OK (HTTP {resp.status}, {size:.0f} Mo)")
     except urllib.error.HTTPError as err:
         print(f"   ERREUR HTTP {err.code} : le repli théorique ne fonctionnera pas.")
+
+    print("\n== 5. Temps réel étendu SIRI (estimated-timetables) ==")
+    try:
+        data = get_json(
+            SIRI_ET_URL, {"LineRef": f"ActIV:Line::{target_line}:SYTRAL"}, auth
+        )
+    except (urllib.error.URLError, TimeoutError, ValueError) as err:
+        print(
+            f"   Indisponible ({err}). Ce flux est irrégulier : l'intégration "
+            "se replie alors sur tclpassagearret, sans erreur."
+        )
+    else:
+        journeys = [
+            j
+            for et in data.get("Siri", {})
+            .get("ServiceDelivery", {})
+            .get("EstimatedTimetableDelivery", [])
+            for f in et.get("EstimatedJourneyVersionFrame", [])
+            for j in f.get("EstimatedVehicleJourney", [])
+        ]
+        print(f"   {len(journeys)} courses suivies sur la ligne {target_line}")
+        found = 0
+        for journey in journeys:
+            for call in journey.get("EstimatedCalls", {}).get("EstimatedCall", []):
+                ref = (call.get("StopPointRef") or {}).get("value", "")
+                parts = ref.split(":")
+                if len(parts) >= 2 and parts[-2] in stop_ids:
+                    found += 1
+                    if found <= 6:
+                        aimed = call.get("AimedDepartureTime") or call.get(
+                            "AimedArrivalTime"
+                        )
+                        expected = call.get("ExpectedDepartureTime") or call.get(
+                            "ExpectedArrivalTime"
+                        )
+                        cancelled = bool(
+                            call.get("Cancellation") or journey.get("Cancellation")
+                        )
+                        print(
+                            f"     arrêt={parts[-2]} théorique={aimed} "
+                            f"estimé={expected} supprimé={cancelled}"
+                        )
+        print(f"   {found} passages à venir aux arrêts {stop_ids}")
+        if journeys and not found:
+            print(
+                "   -> Aucune correspondance d'arrêt : signalez-le (issue GitHub) "
+                "avec la sortie de ce script."
+            )
+
+    print("\n== 6. Alertes trafic (tclalertetrafic_2) ==")
+    try:
+        data = get_json(
+            f"{BASE}/tcl_sytral.tclalertetrafic_2/all.json", {"maxfeatures": -1}, auth
+        )
+    except urllib.error.HTTPError as err:
+        print(f"   ERREUR HTTP {err.code}")
+    else:
+        alerts = [
+            a
+            for a in data.get("values", [])
+            if target_line
+            in {
+                str(a.get("ligne_cli") or "").upper(),
+                str(a.get("ligne_com") or "").upper(),
+            }
+        ]
+        print(f"   {len(alerts)} alertes pour {target_line}")
+        for alert in alerts[:8]:
+            print(
+                f"     [{alert.get('type')}] {alert.get('titre')} "
+                f"({alert.get('debut')} → {alert.get('fin')})"
+            )
 
     print("\nDiagnostic terminé.")
     return 0

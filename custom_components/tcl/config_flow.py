@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFl
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -22,8 +23,9 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from .api import TCLApiClient, TCLApiError, TCLAuthError
+from .api import KNOWN_DIRECTIONS, TCLApiClient, TCLApiError, TCLAuthError
 from .const import (
+    CONF_ALERTS,
     CONF_DEPARTURE_COUNT,
     CONF_DIRECTION,
     CONF_LINE,
@@ -32,6 +34,7 @@ from .const import (
     CONF_MODE,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
+    CONF_SIRI,
     CONF_STATION,
     CONF_STOP_IDS,
     CONF_USERNAME,
@@ -44,6 +47,7 @@ from .const import (
     MODES,
     get_departure_count,
 )
+from .gtfs import fuzzy_match
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -324,21 +328,76 @@ class TCLConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class TCLOptionsFlow(OptionsFlow):
-    """Options : intervalle de rafraîchissement et nombre de départs."""
+    """Options : direction, rafraîchissement, nombre de départs, sources."""
+
+    def _direction_options(self) -> list[SelectOptionDict]:
+        entry = self.config_entry
+        current = entry.data.get(CONF_DIRECTION)
+        line = str(entry.data.get(CONF_LINE, "")).strip().upper()
+        seen: dict[str, None] = {}
+
+        def add(direction: str | None) -> None:
+            # Dédoublonnage tolérant (« St-Priest » ~ « Saint-Priest »)
+            if direction and not any(fuzzy_match(direction, d) for d in seen):
+                seen[direction] = None
+
+        add(current)
+        coordinator = getattr(entry, "runtime_data", None)
+        for dep in getattr(coordinator, "data", None) or []:
+            add(dep.get("destination"))
+        gtfs = getattr(coordinator, "gtfs", None)
+        if gtfs is not None:
+            for headsign in gtfs.directions_for(entry.data[CONF_STATION], line):
+                add(headsign)
+        for known in KNOWN_DIRECTIONS.get(line, ()):
+            add(known)
+        options = [SelectOptionDict(value=DIRECTION_ALL, label="Toutes les directions")]
+        options += [SelectOptionDict(value=d, label=f"→ {d}") for d in seen]
+        return options
+
+    def _apply_direction(self, direction: str) -> None:
+        """Change la direction (stockée dans data) sans recréer l'entrée."""
+        entry = self.config_entry
+        new = None if direction in (DIRECTION_ALL, "") else direction
+        if new == entry.data.get(CONF_DIRECTION):
+            return
+        data = {**entry.data, CONF_DIRECTION: new}
+        title = (
+            f"{data[CONF_LINE]} {data[CONF_STATION]} → {new or 'toutes directions'}"
+        )
+        unique_id = (
+            f"{data[CONF_LINE]}_{data[CONF_STATION]}_{new or 'all'}"
+        ).lower().replace(" ", "_")
+        self.hass.config_entries.async_update_entry(
+            entry, data=data, title=title, unique_id=unique_id
+        )
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
+            self._apply_direction(user_input.pop(CONF_DIRECTION, DIRECTION_ALL))
             user_input[CONF_DEPARTURE_COUNT] = int(
                 user_input[CONF_DEPARTURE_COUNT]
             )
             return self.async_create_entry(title="", data=user_input)
 
+        options = self.config_entry.options
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Required(
+                        CONF_DIRECTION,
+                        default=self.config_entry.data.get(CONF_DIRECTION)
+                        or DIRECTION_ALL,
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=self._direction_options(),
+                            mode=SelectSelectorMode.DROPDOWN,
+                            custom_value=True,
+                        )
+                    ),
                     vol.Required(
                         CONF_SCAN_INTERVAL,
                         default=self.config_entry.options.get(
@@ -364,6 +423,12 @@ class TCLOptionsFlow(OptionsFlow):
                             mode=NumberSelectorMode.BOX,
                         )
                     ),
+                    vol.Required(
+                        CONF_SIRI, default=options.get(CONF_SIRI, True)
+                    ): BooleanSelector(),
+                    vol.Required(
+                        CONF_ALERTS, default=options.get(CONF_ALERTS, True)
+                    ): BooleanSelector(),
                 }
             ),
         )

@@ -1,12 +1,20 @@
 {
   "domain": "tcl",
   "name": "TCL Lyon",
-  "codeowners": ["@justeyanis"],
+  "after_dependencies": [
+    "lovelace"
+  ],
+  "codeowners": [
+    "@justeyanis"
+  ],
   "config_flow": true,
+  "dependencies": [
+    "http"
+  ],
   "documentation": "https://github.com/justeyanis/tcl-home-assistant",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/justeyanis/tcl-home-assistant/issues",
   "requirements": [],
-  "version": "3.2.0"
+  "version": "3.3.0"
 }

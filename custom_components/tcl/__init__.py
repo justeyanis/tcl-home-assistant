@@ -1,8 +1,9 @@
 """Intégration TCL (Transports en Commun Lyonnais) pour Home Assistant.
 
-Données temps réel + horaires théoriques GTFS : data.grandlyon.com
-(compte gratuit requis). Sert et enregistre aussi la carte Lovelace
-`tcl-biv-card` automatiquement (aucune ressource à déclarer à la main).
+Données temps réel (tclpassagearret + SIRI Lite), alertes trafic et horaires
+théoriques GTFS : data.grandlyon.com (compte gratuit requis). Sert et
+enregistre aussi la carte Lovelace `tcl-biv-card` automatiquement (aucune
+ressource à déclarer à la main).
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
@@ -26,11 +28,14 @@ from .gtfs import TCLGtfsSchedule
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CARD_URL_BASE = "/tcl-biv-card"
 CARD_FILENAME = "tcl-biv-card.js"
 
 TCLConfigEntry = ConfigEntry
+
+# Configuration uniquement via l'interface (pas de YAML)
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -105,12 +110,17 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> No
 async def async_setup_entry(hass: HomeAssistant, entry: TCLConfigEntry) -> bool:
     """Initialise une entrée de configuration TCL."""
     session = async_get_clientsession(hass)
-    client = TCLApiClient(
-        session, entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD]
-    )
+    domain_data = hass.data.setdefault(DOMAIN, {})
+
+    # Un client par compte, partagé entre les entrées : ses caches (arrêts,
+    # alertes, flux SIRI par ligne) évitent les requêtes en double.
+    clients: dict = domain_data.setdefault("clients", {})
+    credentials = (entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
+    client = clients.get(credentials)
+    if client is None:
+        client = clients[credentials] = TCLApiClient(session, *credentials)
 
     # Instance GTFS partagée entre toutes les entrées
-    domain_data = hass.data.setdefault(DOMAIN, {})
     if "gtfs" not in domain_data:
         domain_data["gtfs"] = TCLGtfsSchedule(
             hass,

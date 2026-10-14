@@ -13,6 +13,8 @@ CONF_STOP_IDS = "stop_ids"
 CONF_DIRECTION = "direction"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_DEPARTURE_COUNT = "departure_count"
+CONF_SIRI = "realtime_siri"  # temps réel étendu (SIRI estimated-timetables)
+CONF_ALERTS = "traffic_alerts"  # alertes trafic de la ligne
 
 DIRECTION_ALL = "__all__"
 
@@ -50,6 +52,7 @@ ATTR_LINE_COLOR = "couleur"
 ATTR_MODE = "mode"
 ATTR_DIRECTION = "direction"
 ATTR_TCL_BIV = "tcl_biv"
+ATTR_ALERTS = "alertes"
 
 # Couleurs officielles du réseau unifié (route_color du GTFS TCL,
 # rebranding sept. 2025 : trams tous violets, métro A rose). Fallback si
