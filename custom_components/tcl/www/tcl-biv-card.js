@@ -1,6 +1,6 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
- * ║  tcl-biv-card  —  BIV TCL (Lyon) pour Home Assistant   v3.3.0    ║
+ * ║  tcl-biv-card  —  BIV TCL (Lyon) pour Home Assistant   v3.3.1    ║
  * ╚══════════════════════════════════════════════════════════════════╝
  *
  * Deux panneaux :
@@ -19,7 +19,7 @@
  * ressource Lovelace par l'intégration TCL (URL /tcl-biv-card/…?v=<version>,
  * cache géré tout seul à chaque mise à jour). En mode tableaux de bord YAML
  * uniquement, ajoutez la ressource manuellement.
- * Vérification : la console F12 affiche le bandeau TCL-BIV-CARD v3.3.0.
+ * Vérification : la console F12 affiche le bandeau TCL-BIV-CARD v3.3.1.
  *
  * ── Options YAML (défauts indiqués) ──────────────────────────────────
  *   entities: [sensor.tcl_b_debourg_0]  # entités "#0" ; sinon auto-découverte
@@ -68,7 +68,7 @@
 
 "use strict";
 
-const CARD_VERSION = "3.3.0";
+const CARD_VERSION = "3.3.1";
 console.info(
   `%c TCL-BIV-CARD %c v${CARD_VERSION} `,
   "background:#F8C300;color:#111;font-weight:700;border-radius:3px 0 0 3px",

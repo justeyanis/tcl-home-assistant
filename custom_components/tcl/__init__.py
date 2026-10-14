@@ -48,7 +48,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             StaticPathConfig(
                 CARD_URL_BASE,
                 str(Path(__file__).parent / "www"),
-                cache_headers=True,
+                # Pas de cache long : si l'URL versionnée n'a pas pu être
+                # mise à jour, le navigateur doit quand même recharger la carte.
+                cache_headers=False,
             )
         ]
     )
@@ -84,7 +86,9 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> No
             return obj.get(name)
         return getattr(obj, name, None)
 
-    if _attr(lovelace, "mode") != "storage":
+    # `resource_mode` depuis HA 2025 (l'ancien attribut `mode` a disparu)
+    mode = _attr(lovelace, "resource_mode") or _attr(lovelace, "mode")
+    if mode != "storage":
         _LOGGER.debug("Lovelace en mode YAML : ressource %s non gérée", url)
         return
 

@@ -128,6 +128,7 @@ class TCLDepartureSensor(TCLEntity, SensorEntity):
                 for d in (self.coordinator.data or [])[:MAX_DEPARTURES_ATTR]
             ]
             attrs[ATTR_ALERTS] = self.coordinator.alerts
+            attrs["temps_reel_siri"] = self.coordinator.siri_status
         return attrs
 
 

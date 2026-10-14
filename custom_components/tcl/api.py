@@ -16,7 +16,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import FALLBACK_COLORS
 from .gtfs import TZ_LYON, fuzzy_match
-from .siri import SIRI_ET_URL, line_ref, parse_estimated_calls
+from .siri import SIRI_ET_URL, line_ref, parse_estimated_calls, summarize
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -202,6 +202,8 @@ class TCLApiClient:
         self._alerts_cache: tuple[float, list[dict]] | None = None
         self._siri_cache: dict[str, tuple[float, Any]] = {}
         self.siri_available: bool | None = None
+        # ligne -> état du flux SIRI (exposé en attribut pour le dépannage)
+        self.siri_status: dict[str, dict] = {}
 
     async def _get_json(
         self,
@@ -769,13 +771,20 @@ class TCLApiClient:
                     quiet=True,
                 )
                 self._siri_cache[key] = (time.monotonic(), payload)
-        except TCLApiError:
+        except TCLApiError as err:
             if self.siri_available is not False:
                 _LOGGER.info(
-                    "Flux SIRI estimated-timetables indisponible pour l'instant "
-                    "(repli sur tclpassagearret)"
+                    "Flux SIRI estimated-timetables indisponible pour la ligne %s "
+                    "(%s) : repli sur tclpassagearret",
+                    key,
+                    err,
                 )
             self.siri_available = False
+            self.siri_status[key] = {
+                "etat": "erreur",
+                "detail": str(err)[:200],
+                "maj": dt_util.now().isoformat(timespec="seconds"),
+            }
             raise
         if self.siri_available is not True:
             _LOGGER.debug("Flux SIRI estimated-timetables disponible")
@@ -820,12 +829,35 @@ class TCLApiClient:
                     "course": call["course"],
                 }
             )
+        summary = summarize(payload)
+        if not summary["courses"]:
+            state = "aucune course suivie sur la ligne"
+        elif not calls:
+            state = "aucun passage à ces arrêts"
+        elif not departures:
+            state = "passages hors direction ou déjà partis"
+        else:
+            state = "ok"
+        self.siri_status[key] = {
+            "etat": state,
+            "maj": now.isoformat(timespec="seconds"),
+            "courses_suivies": summary["courses"],
+            "passages_aux_arrets": len(calls),
+            "retenus": len(departures),
+            "arrets_configures": [str(s) for s in stop_ids],
+            **(
+                {"lignes_recues": summary["lignes"], "exemples_arrets": summary["exemples_arrets"]}
+                if state != "ok"
+                else {}
+            ),
+        }
         _LOGGER.debug(
-            "SIRI : %d passages ligne %s aux arrêts %s (%d retenus)",
+            "SIRI : %d passages ligne %s aux arrêts %s (%d retenus) %s",
             len(calls),
             line_code,
             stop_ids,
             len(departures),
+            summary,
         )
         return departures
 

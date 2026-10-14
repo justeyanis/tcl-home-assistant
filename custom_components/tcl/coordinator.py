@@ -65,6 +65,14 @@ class TCLCoordinator(DataUpdateCoordinator[list[dict]]):
         self.use_siri = entry.options.get(CONF_SIRI, True)
         self.use_alerts = entry.options.get(CONF_ALERTS, True)
         self.alerts: list[dict] = []
+
+    @property
+    def siri_status(self) -> dict:
+        """État du flux SIRI pour la ligne de cette entrée."""
+        if not self.use_siri:
+            return {"etat": "désactivé dans les options"}
+        line = str(self.config_entry.data.get(CONF_LINE, "")).strip().upper()
+        return self.client.siri_status.get(line, {"etat": "pas encore interrogé"})
         if gtfs is not None:
             gtfs.register(entry.data[CONF_STATION], entry.data[CONF_LINE])
 
