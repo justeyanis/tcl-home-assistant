@@ -1,6 +1,6 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
- * ║  tcl-biv-card  —  BIV TCL (Lyon) pour Home Assistant   v3.3.1    ║
+ * ║  tcl-biv-card  —  BIV TCL (Lyon) pour Home Assistant   v3.3.2    ║
  * ╚══════════════════════════════════════════════════════════════════╝
  *
  * Deux panneaux :
@@ -19,7 +19,7 @@
  * ressource Lovelace par l'intégration TCL (URL /tcl-biv-card/…?v=<version>,
  * cache géré tout seul à chaque mise à jour). En mode tableaux de bord YAML
  * uniquement, ajoutez la ressource manuellement.
- * Vérification : la console F12 affiche le bandeau TCL-BIV-CARD v3.3.1.
+ * Vérification : la console F12 affiche le bandeau TCL-BIV-CARD v3.3.2.
  *
  * ── Options YAML (défauts indiqués) ──────────────────────────────────
  *   entities: [sensor.tcl_b_debourg_0]  # entités "#0" ; sinon auto-découverte
@@ -68,7 +68,7 @@
 
 "use strict";
 
-const CARD_VERSION = "3.3.1";
+const CARD_VERSION = "3.3.2";
 console.info(
   `%c TCL-BIV-CARD %c v${CARD_VERSION} `,
   "background:#F8C300;color:#111;font-weight:700;border-radius:3px 0 0 3px",
@@ -1224,8 +1224,20 @@ const ED_CSS = `
 
 /* ────────────────────────── Enregistrement ────────────────────────── */
 
-customElements.define("tcl-biv-card", TclBivCard);
-customElements.define("tcl-biv-card-editor", TclBivCardEditor);
+// Une seule version peut être enregistrée : si une ancienne copie de la carte
+// (ressource ajoutée à la main) a été chargée avant, on le signale clairement.
+if (customElements.get("tcl-biv-card")) {
+  console.warn(
+    `TCL-BIV-CARD v${CARD_VERSION} ignorée : une autre version (${
+      window.TCL_BIV_CARD_VERSION || "ancienne"
+    }) est déjà chargée. Supprimez l'ancienne ressource dans Paramètres → ` +
+      "Tableaux de bord → ⋮ → Ressources (ex. /local/tcl-biv-card.js)."
+  );
+} else {
+  window.TCL_BIV_CARD_VERSION = CARD_VERSION;
+  customElements.define("tcl-biv-card", TclBivCard);
+  customElements.define("tcl-biv-card-editor", TclBivCardEditor);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push({
