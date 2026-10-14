@@ -100,15 +100,28 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> No
         resources.loaded = True
 
     base = f"{CARD_URL_BASE}/{CARD_FILENAME}"
+    found = False
     for item in list(resources.async_items()):
-        if base in (item.get("url") or ""):
-            if item["url"] != url:
+        item_url = item.get("url") or ""
+        if base in item_url:
+            found = True
+            if item_url != url:
                 await resources.async_update_item(item["id"], {"url": url})
                 _LOGGER.info("Ressource Lovelace mise à jour : %s", url)
-            return
+        elif "tcl-biv-card" in item_url:
+            # Ancienne copie manuelle (ex. /local/tcl-biv-card.js, d'avant la
+            # distribution HACS) : chargée avant la nôtre, elle empêche la
+            # nouvelle version de la carte de s'enregistrer.
+            await resources.async_delete_item(item["id"])
+            _LOGGER.warning(
+                "Ancienne ressource de carte supprimée : %s (remplacée par %s)",
+                item_url,
+                url,
+            )
 
-    await resources.async_create_item({"res_type": "module", "url": url})
-    _LOGGER.info("Ressource Lovelace enregistrée : %s", url)
+    if not found:
+        await resources.async_create_item({"res_type": "module", "url": url})
+        _LOGGER.info("Ressource Lovelace enregistrée : %s", url)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TCLConfigEntry) -> bool:
