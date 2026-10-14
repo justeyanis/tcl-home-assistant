@@ -331,7 +331,12 @@ class TCLGtfsSchedule:
                         "delai": delai,
                         "delai_texte": dep_dt.strftime("%H:%M"),
                         "heure": dep_dt.isoformat(),
+                        "heure_theorique": dep_dt.isoformat(),
+                        "retard": None,
+                        "annule": False,
                         "temps_reel": False,
+                        "source": "gtfs",
+                        "course": None,
                     }
                 )
 

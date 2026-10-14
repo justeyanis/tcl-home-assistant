@@ -1,8 +1,9 @@
 """Intégration TCL (Transports en Commun Lyonnais) pour Home Assistant.
 
-Données temps réel + horaires théoriques GTFS : data.grandlyon.com
-(compte gratuit requis). Sert et enregistre aussi la carte Lovelace
-`tcl-biv-card` automatiquement (aucune ressource à déclarer à la main).
+Données temps réel (tclpassagearret + SIRI Lite), alertes trafic et horaires
+théoriques GTFS : data.grandlyon.com (compte gratuit requis). Sert et
+enregistre aussi la carte Lovelace `tcl-biv-card` automatiquement (aucune
+ressource à déclarer à la main).
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ from .gtfs import TCLGtfsSchedule
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CARD_URL_BASE = "/tcl-biv-card"
 CARD_FILENAME = "tcl-biv-card.js"
 
@@ -105,12 +106,17 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> No
 async def async_setup_entry(hass: HomeAssistant, entry: TCLConfigEntry) -> bool:
     """Initialise une entrée de configuration TCL."""
     session = async_get_clientsession(hass)
-    client = TCLApiClient(
-        session, entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD]
-    )
+    domain_data = hass.data.setdefault(DOMAIN, {})
+
+    # Un client par compte, partagé entre les entrées : ses caches (arrêts,
+    # alertes, flux SIRI par ligne) évitent les requêtes en double.
+    clients: dict = domain_data.setdefault("clients", {})
+    credentials = (entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
+    client = clients.get(credentials)
+    if client is None:
+        client = clients[credentials] = TCLApiClient(session, *credentials)
 
     # Instance GTFS partagée entre toutes les entrées
-    domain_data = hass.data.setdefault(DOMAIN, {})
     if "gtfs" not in domain_data:
         domain_data["gtfs"] = TCLGtfsSchedule(
             hass,

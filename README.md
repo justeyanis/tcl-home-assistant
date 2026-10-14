@@ -7,6 +7,11 @@
 
 Intégration custom **TCL (Transports en Commun Lyonnais)** + carte Lovelace **`tcl-biv-card`** reproduisant les BIV du réseau (écran jaune métro / afficheur LED orange tram-bus).
 
+- **Temps réel** des métros, trams et bus, avec **retards** (+3 min) et **passages supprimés** quand le SAE TCL les publie ;
+- **Alertes trafic** de la ligne : capteur « Perturbation » + bandeau défilant sur la carte ;
+- **Horaires théoriques** en complément (la nuit, fin de service) ;
+- carte fidèle aux panneaux TCL, adaptée au mobile et à la vue « sections ».
+
 Inspirée de [droso-hass/idfm](https://github.com/droso-hass/idfm) : ajout via l'interface avec un assistant **mode → ligne → station → direction**.
 
 ## Installation en un clic
@@ -34,7 +39,20 @@ Les passages temps réel TCL (dataset `tcl_sytral.tclpassagearret`) nécessitent
 
 Chaque entrée crée un appareil nommé `TCL <ligne> <station> → <direction>` avec **un nombre d'entités au choix** (1 à 10, demandé à la dernière étape de l'assistant) : `#0` (prochain départ), `#1`, `#2`… — par exemple `TCL B Debourg → Charpennes Charles Hernu #0` (état = minutes restantes). L'entité `#0` porte l'attribut `departures` (jusqu'à 10 prochains passages) et le marqueur `tcl_biv: true` utilisé par la carte pour l'auto-découverte.
 
-L'intervalle de rafraîchissement (60 s par défaut) et le nombre de départs se règlent à tout moment dans les options de l'intégration (les entités sont créées/supprimées en conséquence).
+Chaque appareil comporte aussi :
+
+| Entité | Rôle |
+|---|---|
+| `… Prochain départ` | **horodatage** du prochain passage (idéal pour les automatisations et l'affichage « à 18:42 ») |
+| `… Perturbation` (binaire) | allumé tant qu'une **perturbation** est en cours sur la ligne (les simples « Information » sont listées sans l'allumer) ; attributs `titre`, `nombre`, `alertes` |
+
+Attributs utiles des entités `#N` : `destination`, `heure`, `heure_theorique`, `retard` (minutes, si connu), `temps_reel` (estimation SAE ou simple horaire), `source` (`siri`, `tcl` ou `gtfs`). Un passage **supprimé** n'est jamais compté comme « prochain départ » mais reste visible sur la carte.
+
+Dans les **options** de l'intégration (⚙ sur l'entrée), à tout moment :
+
+- **changer la direction** sans supprimer/recréer l'entrée (liste des terminus observés + horaires théoriques, ou saisie libre) ;
+- intervalle de rafraîchissement (60 s par défaut) et nombre de départs (les entités sont créées/supprimées en conséquence) ;
+- activer/désactiver le **temps réel étendu** (flux SIRI) et les **alertes trafic**.
 
 **Ajouter un arrêt** sans se ré-authentifier : dès qu'une entrée existe, « Ajouter un service » sur la page de l'intégration réutilise vos identifiants et démarre directement au choix du mode.
 
@@ -70,6 +88,10 @@ Toutes les options YAML :
 | `show_clock` / `show_date` | `true` | horloge (écran métro / pied tram) et date (tram) |
 | `show_destination` | `true` | colonne destination (style tram uniquement) |
 | `show_picto` | `true` | picto véhicule : uniquement quand la rame est à quai, à la place du délai (clignote) |
+| `show_realtime` | `true` | pastille « ondes » sur les passages suivis en temps réel ; horaires purement théoriques atténués |
+| `show_delay` | `true` | badge de retard (`+3`) et passages **SUPPRIMÉ** barrés |
+| `show_alerts` | `true` | bandeau défilant des alertes trafic (rouge si perturbation majeure) |
+| `show_line` | `auto` | badge de ligne sur chaque rangée : `auto` (si plusieurs lignes), `true`, `false` |
 | `line_icon` | `official` | pictogramme de ligne : `official` (SVG tcl.fr), `badge` (pastille), `none` |
 | `header` | direction configurée | texte principal du bandeau |
 | `header_prefix` | `Direction` | préfixe du bandeau |
@@ -97,9 +119,67 @@ Sans `style`, le rendu s'adapte au mode : **métro/funiculaire** → panneau jau
 
 Entre deux rafraîchissements de l'API, la carte recalcule les délais côté client à partir de l'heure de passage : un départ disparaît **30 secondes avant son heure réelle**. Toute la carte est en Arial, sans italique, et la direction s'affiche toujours en entier (retour à la ligne si besoin).
 
+Pratique au quotidien :
+
+- **un clic** sur le panneau ouvre le détail de l'entité (historique, attributs) ;
+- **plusieurs lignes au même arrêt** (ex. `entities: [sensor.tcl_c3_cordeliers_0, sensor.tcl_c13_cordeliers_0]`) : les départs sont fusionnés et chaque rangée porte le badge de sa ligne ;
+- la carte se **réduit automatiquement** sur mobile / colonnes étroites et occupe toute la largeur en vue « sections » ;
+- les animations (défilement, clignotement) respectent le réglage système « réduire les animations ».
+
+### Exemples d'automatisations
+
+Prévenir s'il faut partir (le prochain tram est dans 6 minutes) :
+
+```yaml
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.tcl_t1_debourg_iut_feyssine_0
+    below: 7
+conditions:
+  - condition: time
+    after: "07:30:00"
+    before: "08:30:00"
+    weekday: [mon, tue, wed, thu, fri]
+actions:
+  - action: notify.mobile_app_mon_telephone
+    data:
+      message: >
+        T1 dans {{ states('sensor.tcl_t1_debourg_iut_feyssine_0') }} min
+        {% if state_attr('sensor.tcl_t1_debourg_iut_feyssine_0', 'retard') %}
+        (retard +{{ state_attr('sensor.tcl_t1_debourg_iut_feyssine_0', 'retard') }} min)
+        {% endif %}
+```
+
+Être alerté d'une perturbation sur sa ligne :
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.tcl_b_debourg_charpennes_charles_hernu_perturbation
+    to: "on"
+actions:
+  - action: notify.mobile_app_mon_telephone
+    data:
+      title: Perturbation métro B
+      message: "{{ state_attr(trigger.entity_id, 'titre') }}"
+```
+
+> Les identifiants d'entités ci-dessus sont des exemples : reprenez ceux de votre appareil (Paramètres → Appareils et services → TCL Lyon).
+
 ## Horaires théoriques (GTFS)
 
 Quand le temps réel est vide (la nuit, ou service terminé), l'intégration complète avec les horaires théoriques du GTFS officiel TCL, téléchargé automatiquement chaque semaine avec vos identifiants (fichier `tcl_gtfs.zip` dans votre dossier de config, ~50-100 Mo). L'index se construit en tâche de fond au premier démarrage : les départs théoriques peuvent mettre quelques minutes à apparaître la première fois. Sur la carte, un départ à plus d'une heure s'affiche « HH:MM » plutôt qu'en minutes.
+
+## Sources de données
+
+| Source | Contenu | Rôle |
+|---|---|---|
+| SIRI Lite `estimated-timetables` | toutes les courses suivies par le SAE : heure théorique + estimée, suppressions | temps réel étendu (retards, plus de 2 passages) — flux **irrégulier**, jamais bloquant |
+| `tcl_sytral.tclpassagearret` | 2 prochains passages par ligne et par arrêt, type E (estimé) / T (théorique) | temps réel de base |
+| `tcl_sytral.tclalertetrafic_2` | alertes trafic (titre, message, début/fin) | capteur « Perturbation », bandeau de la carte (rafraîchi toutes les 5 min) |
+| GTFS TCL | horaires théoriques | complément la nuit / en fin de service |
+
+Les passages des différentes sources sont fusionnés sans doublon (même course, ou même destination à ±90 s). Quand le flux SIRI ne répond pas, l'intégration continue avec `tclpassagearret` sans erreur ni avertissement répété.
 
 ## Notes techniques
 
@@ -115,7 +195,7 @@ Quand le temps réel est vide (la nuit, ou service terminé), l'intégration com
 
 Si les départs ne s'affichent pas :
 
-1. Activez les logs debug et guettez notamment l'avertissement « Aucun passage ne correspond à la direction configurée » (direction obsolète → reconfigurez l'entrée) :
+1. Activez les logs debug et guettez notamment l'avertissement « Aucun passage ne correspond à la direction configurée » (direction obsolète → changez-la dans les **options** de l'entrée) :
 
 ```yaml
 logger:
@@ -123,7 +203,7 @@ logger:
     custom_components.tcl: debug
 ```
 
-2. Lancez le script de diagnostic (Python 3.9+, aucune dépendance) qui vérifie chaque maillon — station, temps réel, filtre de direction, GTFS :
+2. Lancez le script de diagnostic (Python 3.9+, aucune dépendance) qui vérifie chaque maillon — station, temps réel, filtre de direction, GTFS, flux SIRI et alertes trafic :
 
 ```bash
 python diagnose.py --station "Charpennes" --ligne B --direction "St-Genis"

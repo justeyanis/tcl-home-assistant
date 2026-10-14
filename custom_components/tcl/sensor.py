@@ -1,17 +1,17 @@
 """Sensors TCL : un sensor par rang de départ (#0 = prochain départ)."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import TCLConfigEntry
 from .const import (
+    ATTR_ALERTS,
     ATTR_DEPARTURES,
     ATTR_DIRECTION,
     ATTR_LINE,
@@ -26,11 +26,17 @@ from .const import (
     CONF_LINE_NAME,
     CONF_MODE,
     CONF_STATION,
-    DOMAIN,
     MAX_DEPARTURES_ATTR,
     get_departure_count,
 )
 from .coordinator import TCLCoordinator
+from .entity import TCLEntity
+
+MODE_ICONS = {
+    "bus": "mdi:bus",
+    "tram": "mdi:tram",
+    "funiculaire": "mdi:gondola",
+}
 
 
 async def async_setup_entry(
@@ -52,54 +58,34 @@ async def async_setup_entry(
         if suffix.isdigit() and int(suffix) > count:
             registry.async_remove(reg_entry.entity_id)
 
-    async_add_entities(
+    entities: list[SensorEntity] = [
         TCLDepartureSensor(coordinator, entry, rank) for rank in range(1, count + 1)
-    )
+    ]
+    entities.append(TCLNextDepartureTimeSensor(coordinator, entry))
+    async_add_entities(entities)
 
 
-class TCLDepartureSensor(CoordinatorEntity[TCLCoordinator], SensorEntity):
+class TCLDepartureSensor(TCLEntity, SensorEntity):
     """Départ de rang N. Nommé '#0' pour le prochain, '#1' pour le suivant…"""
 
-    _attr_has_entity_name = True
     _attr_native_unit_of_measurement = "min"
-    _attr_icon = "mdi:subway-variant"
 
     def __init__(
         self, coordinator: TCLCoordinator, entry: TCLConfigEntry, rank: int
     ) -> None:
-        super().__init__(coordinator)
-        self._entry = entry
+        super().__init__(coordinator, entry)
         self._rank = rank
         self._attr_unique_id = f"{entry.entry_id}_departure_{rank}"
         # Nom complet = nom de l'appareil + " #N", par ex.
         # "TCL B Debourg → Charpennes Charles Hernu #0"
         self._attr_name = f"#{rank - 1}"
-
-        mode = entry.data.get(CONF_MODE, "")
-        if mode == "bus":
-            self._attr_icon = "mdi:bus"
-        elif mode == "tram":
-            self._attr_icon = "mdi:tram"
-
-        line = entry.data[CONF_LINE]
-        station = entry.data[CONF_STATION]
-        direction = entry.data.get(CONF_DIRECTION)
-        # La ligne fait partie du nom : une même station peut être desservie
-        # par plusieurs lignes configurées séparément (ex. Debourg : B et T1).
-        device_name = f"TCL {line} {station}"
-        if direction:
-            device_name += f" → {direction}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=device_name,
-            manufacturer="SYTRAL / TCL",
-            model=entry.data.get(CONF_LINE_NAME) or f"Ligne {line}",
-            entry_type=DeviceEntryType.SERVICE,
+        self._attr_icon = MODE_ICONS.get(
+            entry.data.get(CONF_MODE, ""), "mdi:subway-variant"
         )
 
     @property
     def _departure(self) -> dict | None:
-        data = self.coordinator.data or []
+        data = self.active_departures
         if len(data) >= self._rank:
             return data[self._rank - 1]
         return None
@@ -128,13 +114,51 @@ class TCLDepartureSensor(CoordinatorEntity[TCLCoordinator], SensorEntity):
                     "destination": dep["destination"],
                     "delai_texte": dep["delai_texte"],
                     "heure": dep["heure"],
+                    "heure_theorique": dep.get("heure_theorique"),
+                    "retard": dep.get("retard"),
                     "temps_reel": dep["temps_reel"],
+                    "source": dep.get("source"),
                 }
             )
         if self._rank == 1:
             # Marqueur pour l'auto-découverte par la carte tcl-biv-card
             attrs[ATTR_TCL_BIV] = True
-            attrs[ATTR_DEPARTURES] = (self.coordinator.data or [])[
-                :MAX_DEPARTURES_ATTR
+            attrs[ATTR_DEPARTURES] = [
+                {k: v for k, v in d.items() if k != "course"}
+                for d in (self.coordinator.data or [])[:MAX_DEPARTURES_ATTR]
             ]
+            attrs[ATTR_ALERTS] = self.coordinator.alerts
         return attrs
+
+
+class TCLNextDepartureTimeSensor(TCLEntity, SensorEntity):
+    """Heure du prochain départ (horodatage) : pratique pour les automatisations."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_translation_key = "next_departure"
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(self, coordinator: TCLCoordinator, entry: TCLConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_next_time"
+
+    @property
+    def native_value(self) -> datetime | None:
+        for dep in self.active_departures:
+            if dep.get("heure"):
+                try:
+                    return datetime.fromisoformat(dep["heure"])
+                except ValueError:
+                    continue
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        dep = next(iter(self.active_departures), None)
+        if not dep:
+            return {}
+        return {
+            "destination": dep["destination"],
+            "retard": dep.get("retard"),
+            "temps_reel": dep["temps_reel"],
+        }

@@ -1,6 +1,6 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
- * ║  tcl-biv-card  —  BIV TCL (Lyon) pour Home Assistant   v3.2.0    ║
+ * ║  tcl-biv-card  —  BIV TCL (Lyon) pour Home Assistant   v3.3.0    ║
  * ╚══════════════════════════════════════════════════════════════════╝
  *
  * Deux panneaux :
@@ -19,7 +19,7 @@
  * ressource Lovelace par l'intégration TCL (URL /tcl-biv-card/…?v=<version>,
  * cache géré tout seul à chaque mise à jour). En mode tableaux de bord YAML
  * uniquement, ajoutez la ressource manuellement.
- * Vérification : la console F12 affiche le bandeau TCL-BIV-CARD v3.2.0.
+ * Vérification : la console F12 affiche le bandeau TCL-BIV-CARD v3.3.0.
  *
  * ── Options YAML (défauts indiqués) ──────────────────────────────────
  *   entities: [sensor.tcl_b_debourg_0]  # entités "#0" ; sinon auto-découverte
@@ -35,6 +35,10 @@
  *   show_date: true                     # date (pied tram)
  *   show_destination: true              # destination (colonne tram)
  *   show_picto: true                    # picto véhicule
+ *   show_realtime: true                 # pastille « temps réel » / heures théoriques atténuées
+ *   show_delay: true                    # retard (+3) et passages supprimés
+ *   show_alerts: true                   # bandeau défilant des alertes trafic
+ *   show_line: auto                     # badge de ligne par rangée : auto | true | false
  *   header: ""                          # direction forcée (déf.: config)
  *   header_prefix: "Direction"
  *   via: ""                             # sous-texte droite, multi-ligne
@@ -48,7 +52,9 @@
  *
  * Comportements : le picto véhicule ne s'affiche QUE lorsque la rame est
  * à quai (délai 0), en remplacement du délai, et clignote. Un départ
- * disparaît 30 s avant son heure réelle.
+ * disparaît 30 s avant son heure réelle. Un clic sur la carte ouvre le détail
+ * de l'entité. Les passages théoriques (sans estimation temps réel) sont
+ * atténués ; les passages suivis en temps réel portent une petite pastille.
  *
  * ── Exemple façon BIV funiculaire ────────────────────────────────────
  *   type: custom:tcl-biv-card
@@ -61,7 +67,7 @@
 
 "use strict";
 
-const CARD_VERSION = "3.2.0";
+const CARD_VERSION = "3.3.0";
 console.info(
   `%c TCL-BIV-CARD %c v${CARD_VERSION} `,
   "background:#F8C300;color:#111;font-weight:700;border-radius:3px 0 0 3px",
@@ -98,6 +104,19 @@ const PICTO = `
       d="M11.2 24.6 L3.6 33.4 M20.8 24.6 L28.4 33.4 M2.2 31.4 L29.8 31.4"/>
   </svg>`;
 
+/* Pastille « temps réel » (ondes, comme sur l'appli TCL) */
+const RT_ICON = `
+  <svg class="rt" viewBox="0 0 16 16" role="img" aria-label="temps réel">
+    <title>Temps réel</title>
+    <path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+      d="M3 13 A10 10 0 0 1 13 3 M3 8.4 A5.4 5.4 0 0 1 8.4 3"/>
+    <circle cx="3.6" cy="12.4" r="2" fill="currentColor"/>
+  </svg>`;
+
+const ALERT_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor"
+    d="M12 2 1 21h22L12 2Zm1 15h-2v2h2v-2Zm0-7h-2v5h2v-5Z"/></svg>`;
+
 const DEFAULTS = {
   count: 3,
   style: "auto",
@@ -108,6 +127,10 @@ const DEFAULTS = {
   show_date: true,
   show_destination: true,
   show_picto: true,
+  show_realtime: true,
+  show_delay: true,
+  show_alerts: true,
+  show_line: "auto",
   title: "",
   header: "",
   header_prefix: "Direction",
@@ -185,7 +208,24 @@ class TclBivCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 3;
+    return 2 + Math.min(Number(this._config?.count) || 3, 6);
+  }
+
+  /* Vue « sections » : pleine largeur par défaut, hauteur automatique */
+  getGridOptions() {
+    return { columns: 12, min_columns: 6, rows: "auto" };
+  }
+
+  _moreInfo() {
+    const entityId = this._mainEntityId;
+    if (!entityId) return;
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   /* ---------- données ---------- */
@@ -229,6 +269,7 @@ class TclBivCard extends HTMLElement {
     const deps = [];
     for (const e of entities) {
       for (const d of e.attributes.departures || []) {
+        if (d.annule && !this._config.show_delay) continue;
         let delai = d.delai;
         if (d.heure) {
           const msLeft = new Date(d.heure) - now;
@@ -244,6 +285,69 @@ class TclBivCard extends HTMLElement {
     }
     deps.sort((a, b) => a.delai - b.delai);
     return deps.slice(0, this._config.count);
+  }
+
+  _alerts(entities) {
+    if (!this._config.show_alerts) return [];
+    const seen = new Map();
+    for (const e of entities) {
+      for (const a of e.attributes.alertes || []) {
+        if (a && a.titre && !seen.has(a.titre)) seen.set(a.titre, a);
+      }
+    }
+    return [...seen.values()];
+  }
+
+  /* Délai affiché : picto à quai, HH:MM au-delà d'une heure, sinon minutes,
+     + pastille temps réel et retard. */
+  _timeHtml(d, picto, atStopText) {
+    const c = this._config;
+    if (d.annule) return `<span class="cancel">SUPPRIMÉ</span>`;
+    let html;
+    if (d.delai === 0) {
+      html = c.show_picto ? picto : atStopText;
+    } else if (d.delai >= 60 && d.heure) {
+      html = hhmm(new Date(d.heure));
+    } else {
+      html = `${d.delai}&#160;min`;
+    }
+    if (c.show_realtime && d.temps_reel && d.delai !== 0) {
+      html += RT_ICON;
+    }
+    if (c.show_delay && Number(d.retard) >= 2) {
+      html += `<span class="late" title="Retard">+${Number(d.retard)}</span>`;
+    }
+    return html;
+  }
+
+  _showLine(entities, deps) {
+    const mode = this._config.show_line;
+    if (mode === true || mode === "true") return true;
+    if (mode === false || mode === "false") return false;
+    return new Set(deps.map((d) => d.ligne)).size > 1;
+  }
+
+  _alertsHtml(alerts) {
+    if (!alerts.length) return "";
+    const major = alerts.some((a) => /majeure/i.test(a.type || ""));
+    const text = alerts
+      .map((a) => {
+        const msg = (a.message || "").slice(0, 220);
+        return `<b>${esc(a.titre)}</b>${msg && msg !== a.titre ? ` — ${esc(msg)}` : ""}`;
+      })
+      .join(`<span class="a-sep">◆</span>`);
+    const chars = alerts.reduce(
+      (n, a) => n + (a.titre || "").length + Math.min((a.message || "").length, 220),
+      0
+    );
+    const dur = Math.max(12, Math.round(chars * 0.16));
+    return `
+      <div class="alerts ${major ? "major" : ""}" title="${esc(
+        alerts.map((a) => a.titre).join(" • ")
+      )}">
+        <span class="a-ico">${ALERT_ICON}</span>
+        <div class="a-track"><span class="a-text" style="animation-duration:${dur}s">${text}</span></div>
+      </div>`;
   }
 
   _label(i) {
@@ -272,6 +376,17 @@ class TclBivCard extends HTMLElement {
     this._lastHtml = html;
     this.shadowRoot.innerHTML = html;
 
+    // Le défilement des alertes reprend là où il en était (pas de saut
+    // à chaque rafraîchissement du panneau)
+    const ticker = this.shadowRoot.querySelector(".a-text");
+    if (ticker) {
+      const dur = parseFloat(ticker.style.animationDuration) || 20;
+      ticker.style.animationDelay = `-${(Date.now() / 1000) % dur}s`;
+    }
+
+    const card = this.shadowRoot.querySelector(".biv");
+    if (card) card.addEventListener("click", () => this._moreInfo());
+
     const sel = this.shadowRoot.getElementById("station");
     if (sel) {
       sel.addEventListener("change", (ev) => {
@@ -297,6 +412,7 @@ class TclBivCard extends HTMLElement {
       this._selected = stations.keys().next().value;
     }
     const stationEntities = stations.get(this._selected);
+    this._mainEntityId = stationEntities[0].entity_id;
     const mode = stationEntities[0].attributes.mode || "metro";
     const deps = this._departures(stationEntities);
     const style =
@@ -315,10 +431,12 @@ class TclBivCard extends HTMLElement {
           .join("")}</select>`
       : "";
 
+    const unavailable = stationEntities.every((e) => e.state === "unavailable");
+    const alerts = this._alertsHtml(this._alerts(stationEntities));
     const body =
       style === "metro"
-        ? this._metroHtml(deps, stationEntities)
-        : this._tramHtml(deps, stationEntities);
+        ? this._metroHtml(deps, stationEntities, alerts, unavailable)
+        : this._tramHtml(deps, stationEntities, alerts, unavailable);
 
     return `
       <style>${CSS}</style>
@@ -346,7 +464,7 @@ class TclBivCard extends HTMLElement {
   }
 
   /* Panneau métro/funiculaire : bandeau jaune + écran noir */
-  _metroHtml(deps, entities) {
+  _metroHtml(deps, entities, alerts = "", unavailable = false) {
     const c = this._config;
     const line = entities[0].attributes.ligne || "";
     const color = this._lineColor(line, entities);
@@ -363,28 +481,32 @@ class TclBivCard extends HTMLElement {
         </div>`
       : "";
 
+    const multi = this._showLine(entities, deps);
     const rows = deps.length
       ? deps
           .map((d, i) => {
             // Le picto n'apparaît QUE lorsque la rame est à quai (délai 0),
             // à la place du délai, et clignote.
-            const atStop = d.delai === 0;
-            const value = atStop
-              ? c.show_picto
-                ? `<span class="m-rowpicto blink">${PICTO}</span>`
-                : "proche"
-              : d.delai >= 60 && d.heure
-                ? hhmm(new Date(d.heure))
-                : `${d.delai}&#160;min`;
+            const value = this._timeHtml(
+              d,
+              `<span class="m-rowpicto blink">${PICTO}</span>`,
+              "proche"
+            );
+            const theo = c.show_realtime && d.temps_reel === false && !d.annule;
+            const badge = multi
+              ? `<span class="rowline" style="background:${esc(
+                  this._lineColor(d.ligne, entities)
+                )}">${esc(d.ligne)}</span>`
+              : "";
             return `
-              <div class="m-row">
-                <span class="m-lbl">${esc(this._label(i))}</span>
-                <span class="m-val ${d.temps_reel === false ? "theo" : ""}">:&#160;${value}</span>
+              <div class="m-row ${d.annule ? "is-cancel" : ""}">
+                <span class="m-lbl">${badge}${esc(this._label(i))}</span>
+                <span class="m-val ${theo ? "theo" : ""}">:&#160;${value}</span>
               </div>`;
           })
           .join("")
       : `<div class="m-row"><span class="m-lbl">${esc(this._label(0))}</span>
-           <span class="m-val off">:&#160;— —</span></div>`;
+           <span class="m-val off">:&#160;${unavailable ? "indisponible" : "— —"}</span></div>`;
 
     return `
       <div class="biv metro" style="${this._cssVars()}">
@@ -393,11 +515,12 @@ class TclBivCard extends HTMLElement {
           ${c.show_clock ? `<span class="m-clock">${hhmm(new Date())}</span>` : ""}
           <div class="m-rows">${rows}</div>
         </div>
+        ${alerts}
       </div>`;
   }
 
   /* Panneau tram/bus : afficheur LED ambre à matrice de points */
-  _tramHtml(deps, entities) {
+  _tramHtml(deps, entities, alerts = "", unavailable = false) {
     const c = this._config;
     const line = entities[0].attributes.ligne || "";
     const color = this._lineColor(line, entities);
@@ -413,25 +536,32 @@ class TclBivCard extends HTMLElement {
         </div>`
       : "";
 
+    const multi = this._showLine(entities, deps);
     const rows = deps.length
       ? deps
           .map((d) => {
-            const atStop = d.delai === 0;
-            const delay = atStop
-              ? c.show_picto
-                ? `<span class="t-rowpicto blink">${PICTO}</span>`
-                : "&gt;&gt;"
-              : d.delai >= 60 && d.heure
-                ? hhmm(new Date(d.heure))
-                : `${d.delai} min`;
+            const delay = this._timeHtml(
+              d,
+              `<span class="t-rowpicto blink">${PICTO}</span>`,
+              "&gt;&gt;"
+            );
+            const theo = c.show_realtime && d.temps_reel === false && !d.annule;
+            const badge = multi
+              ? `<span class="rowline" style="background:${esc(
+                  this._lineColor(d.ligne, entities)
+                )}">${esc(d.ligne)}</span>`
+              : "";
             return `
-              <div class="t-row">
-                ${c.show_destination ? `<span class="t-dest">${esc(upper(d.destination))}</span>` : `<span class="t-dest"></span>`}
+              <div class="t-row ${theo ? "theo" : ""} ${d.annule ? "is-cancel" : ""}">
+                ${badge}
+                <span class="t-dest">${c.show_destination ? esc(upper(d.destination)) : ""}</span>
                 <span class="t-delay">${delay}</span>
               </div>`;
           })
           .join("")
-      : `<div class="t-row"><span class="t-dest">PAS DE PASSAGE ANNONCE</span></div>`;
+      : `<div class="t-row"><span class="t-dest">${
+          unavailable ? "SERVICE INDISPONIBLE" : "PAS DE PASSAGE ANNONCE"
+        }</span></div>`;
 
     const footer =
       c.show_date || c.show_clock
@@ -448,6 +578,7 @@ class TclBivCard extends HTMLElement {
           <div class="t-inner">${rows}${footer}</div>
           <div class="t-dots"></div>
         </div>
+        ${alerts}
       </div>`;
   }
 }
@@ -468,7 +599,48 @@ const CSS = `
     margin: 12px 16px 16px; border-radius: 12px; overflow: hidden;
     border: 2px solid #1a1a1a;
     box-shadow: 0 6px 18px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.15);
-    line-height: 1.15;
+    line-height: 1.15; cursor: pointer;
+    container-type: inline-size; container-name: biv;
+  }
+
+  /* temps réel, retards, suppressions */
+  .rt { width: .62em; height: .62em; margin-left: .35em; flex: none;
+        align-self: flex-start; margin-top: -.05em;
+        animation: tcl-rt 2.4s ease-in-out infinite; }
+  @keyframes tcl-rt { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+  .late { margin-left: .4em; padding: 0 .32em; border-radius: 4px;
+          font-size: .7em; line-height: 1.45; background: #e5332a; color: #fff;
+          text-shadow: none; letter-spacing: 0; align-self: center; }
+  .cancel { color: #ff4d4d; letter-spacing: 1px; font-size: .8em;
+            text-shadow: 0 0 6px rgba(255,77,77,.6); }
+  .is-cancel .m-lbl, .is-cancel .t-dest { text-decoration: line-through;
+            text-decoration-thickness: 2px; opacity: .6; }
+  .rowline { display: inline-flex; align-items: center; justify-content: center;
+             min-width: 2.1em; height: 1.45em; padding: 0 .3em; margin-right: .45em;
+             border-radius: 4px; color: #fff; font-size: .74em; font-weight: 800;
+             letter-spacing: 0; text-shadow: none; vertical-align: middle;
+             font-family: Arial, Helvetica, sans-serif; }
+  .t-row .rowline { flex: none; margin-right: 0; }
+
+  /* bandeau d'alertes trafic (défilant) */
+  .alerts {
+    display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+    background: #f2a900; color: #111; font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px; border-top: 2px solid #b97f00; overflow: hidden;
+  }
+  .alerts.major { background: #d6261c; color: #fff; border-top-color: #8f160f; }
+  .a-ico { flex: none; width: 18px; height: 18px; display: inline-flex; }
+  .a-ico svg { width: 100%; height: 100%; }
+  .a-track { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
+             mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
+  .a-text { display: inline-block; padding-left: 100%;
+            animation: tcl-marquee 20s linear infinite; }
+  .a-sep { margin: 0 14px; opacity: .6; }
+  @keyframes tcl-marquee { from { transform: translateX(0) } to { transform: translateX(-100%) } }
+  @media (prefers-reduced-motion: reduce) {
+    .a-track { white-space: normal; mask-image: none; }
+    .a-text { animation: none; padding-left: 0; }
+    .blink, .rt { animation: none; }
   }
 
   /* pictogramme de ligne (officiel + repli) */
@@ -510,7 +682,7 @@ const CSS = `
            text-shadow: 0 0 6px; }
   .m-val { color: var(--tcl-value, #3dc473); text-shadow: 0 0 6px;
            display: flex; align-items: center; gap: 8px; }
-  .m-val.theo { opacity: .75; }
+  .m-val.theo { opacity: .6; }
   .m-val.off { color: #444; text-shadow: none; }
   .m-rowpicto { display: inline-flex; width: 26px; height: 28px;
                 filter: drop-shadow(0 0 4px); }
@@ -545,7 +717,8 @@ const CSS = `
     letter-spacing: 2px; text-shadow: 0 0 7px, 0 0 2px;
   }
   .t-dest { flex: 1; min-width: 0; }
-  .t-delay { flex: none; }
+  .t-delay { flex: none; display: inline-flex; align-items: center; }
+  .t-row.theo { opacity: .6; }
   .t-rowpicto { flex: none; width: 24px; height: 26px;
                 display: inline-flex; filter: drop-shadow(0 0 4px); }
   .t-rowpicto svg { width: 100%; height: 100%; }
@@ -555,6 +728,28 @@ const CSS = `
     font-family: Arial, Helvetica, sans-serif;
     color: var(--tcl-led, #ffa61a); font-size: 13px;
     letter-spacing: 2px; opacity: .9; text-shadow: 0 0 4px;
+  }
+
+  /* cartes étroites (colonnes, mobile) */
+  @container biv (max-width: 400px) {
+    .m-header { gap: 8px; padding: 8px 10px; }
+    .m-name { font-size: 20px; }
+    .m-prefix { font-size: 12px; }
+    .m-screen { gap: 14px; padding: 12px 12px; }
+    .m-clock { font-size: 26px; }
+    .m-row { font-size: 18px; min-height: 26px; }
+    .m-lbl { min-width: 92px; }
+    .licon { height: 24px; }
+    .lbadge { height: 24px; min-width: 24px; font-size: 13px; }
+    .t-row { font-size: 16px; letter-spacing: 1px; gap: 8px; }
+    .t-inner { padding: 10px 12px; }
+  }
+  @container biv (max-width: 340px) {
+    .m-screen { gap: 10px; padding: 10px 10px; }
+    .m-clock { font-size: 22px; }
+    .m-row { font-size: 16px; }
+    .m-lbl { min-width: 76px; }
+    .t-row { font-size: 15px; letter-spacing: .5px; }
   }
 
   @keyframes tcl-blink { 0%,49% {opacity:1} 50%,100% {opacity:.15} }
@@ -569,6 +764,9 @@ const ED_TOGGLES = [
   ["show_date", "Date (tram)"],
   ["show_destination", "Destinations (tram)"],
   ["show_picto", "Pictos véhicule"],
+  ["show_realtime", "Pastille temps réel"],
+  ["show_delay", "Retards et suppressions"],
+  ["show_alerts", "Alertes trafic"],
   ["show_selector", "Menu des stations"],
 ];
 
@@ -655,6 +853,13 @@ class TclBivCardEditor extends HTMLElement {
               <option value="official" ${c.line_icon === "official" ? "selected" : ""}>Officiel TCL (tcl.fr)</option>
               <option value="badge" ${c.line_icon === "badge" ? "selected" : ""}>Pastille colorée</option>
               <option value="none" ${c.line_icon === "none" ? "selected" : ""}>Aucun</option>
+            </select>
+          </label>
+          <label>Ligne sur chaque rangée
+            <select data-k="show_line">
+              <option value="auto" ${String(c.show_line) === "auto" ? "selected" : ""}>Auto (si plusieurs lignes)</option>
+              <option value="true" ${String(c.show_line) === "true" ? "selected" : ""}>Toujours</option>
+              <option value="false" ${String(c.show_line) === "false" ? "selected" : ""}>Jamais</option>
             </select>
           </label>
           <label>Nombre de départs
@@ -807,5 +1012,5 @@ window.customCards.push({
   name: "TCL BIV Card",
   preview: true,
   description:
-    "Prochains départs TCL façon BIV (panneau métro jaune / afficheur LED tram), pictogrammes officiels, éditeur graphique.",
+    "Prochains départs TCL façon BIV (panneau métro jaune / afficheur LED tram) : temps réel, retards, alertes trafic, pictogrammes officiels.",
 });

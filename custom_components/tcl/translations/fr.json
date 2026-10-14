@@ -11,15 +11,21 @@
       },
       "mode": {
         "title": "Mode de transport",
-        "data": { "mode": "Mode" }
+        "data": {
+          "mode": "Mode"
+        }
       },
       "line": {
         "title": "Ligne",
-        "data": { "line": "Ligne" }
+        "data": {
+          "line": "Ligne"
+        }
       },
       "station": {
         "title": "Station / arrêt",
-        "data": { "station": "Station" }
+        "data": {
+          "station": "Station"
+        }
       },
       "direction": {
         "title": "Direction",
@@ -44,9 +50,13 @@
     "step": {
       "init": {
         "title": "Options TCL",
+        "description": "Changer la direction ici évite de supprimer et recréer l'entrée.",
         "data": {
+          "direction": "Direction",
           "scan_interval": "Intervalle de rafraîchissement (secondes)",
-          "departure_count": "Nombre de départs (entités créées)"
+          "departure_count": "Nombre de départs (entités créées)",
+          "realtime_siri": "Temps réel étendu (flux SIRI : tous les passages suivis, retards, suppressions)",
+          "traffic_alerts": "Alertes trafic de la ligne (capteur « Perturbation » + bandeau sur la carte)"
         }
       }
     }
@@ -58,6 +68,18 @@
         "funiculaire": "Funiculaire",
         "tram": "Tramway",
         "bus": "Bus"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_departure": {
+        "name": "Prochain départ"
+      }
+    },
+    "binary_sensor": {
+      "disruption": {
+        "name": "Perturbation"
       }
     }
   }

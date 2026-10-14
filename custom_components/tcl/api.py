@@ -16,12 +16,30 @@ from homeassistant.util import dt as dt_util
 
 from .const import FALLBACK_COLORS
 from .gtfs import TZ_LYON, fuzzy_match
+from .siri import SIRI_ET_URL, line_ref, parse_estimated_calls
 
 _LOGGER = logging.getLogger(__name__)
 
 BASE_URL = "https://data.grandlyon.com/fr/datapusher/ws/rdata"
 DATASET_SCHEMA = "tcl_sytral"
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
+# Le flux SIRI est un complément : il ne doit jamais retarder la mise à jour
+SIRI_TIMEOUT = aiohttp.ClientTimeout(total=15)
+ALERTS_CACHE_SECONDS = 300
+SIRI_CACHE_SECONDS = 10
+
+# Gravité des alertes trafic, de la plus forte à la plus faible
+ALERT_TYPE_RANK = {
+    "perturbation majeure": 3,
+    "perturbation": 2,
+    "travaux": 1,
+    "information": 0,
+}
+
+
+def alert_level(alert: dict) -> int:
+    """Gravité d'une alerte (type inconnu = 1, comme des travaux)."""
+    return ALERT_TYPE_RANK.get(str(alert.get("type") or "").strip().lower(), 1)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; HomeAssistant-TCL/1.0)",
     "Accept": "application/json",
@@ -41,6 +59,8 @@ PASSAGE_DIRECTION_FIELDS = ("direction", "destination")
 PASSAGE_DELAY_FIELDS = ("delaipassage", "delai")
 PASSAGE_TIME_FIELDS = ("heurepassage", "heure")
 PASSAGE_TYPE_FIELDS = ("type",)
+PASSAGE_DEST_ID_FIELDS = ("idtarretdestination",)
+PASSAGE_COURSE_FIELDS = ("coursetheorique",)
 
 # Noms de tables connus, essayés dans l'ordre si le catalogue
 # /rdata/all.json est inaccessible (certains comptes reçoivent un 403).
@@ -52,6 +72,7 @@ _TABLE_BASES: dict[str, tuple[str, ...]] = {
     "metro": ("tcllignemf",),
     "tram": ("tcllignetram",),
     "bus": ("tcllignebus",),
+    "alerts": ("tclalertetrafic",),
 }
 _TABLE_VERSIONS = ("", "_5_0_0", "_4_0_0", "_3_0_0", "_2_0_0", "_1_0_0")
 
@@ -92,6 +113,11 @@ DEFAULT_TABLES: dict[str, tuple[str, ...]] = {
     )
     for key, bases in _TABLE_BASES.items()
 }
+# Alertes : la v2 (vérifiée en oct. 2026) avant une éventuelle v1 figée
+DEFAULT_TABLES["alerts"] = (
+    f"{DATASET_SCHEMA}.tclalertetrafic_2",
+    *DEFAULT_TABLES["alerts"],
+)
 
 
 class TCLApiError(Exception):
@@ -171,20 +197,35 @@ class TCLApiClient:
         self._filter_style: str | None = None
         self._scan_cache: tuple[float, list[dict]] | None = None
         self._warned_directions: set[str] = set()
+        # id d'arrêt terminus -> libellé de direction (appris du temps réel)
+        self._dest_names: dict[str, str] = {}
+        self._alerts_cache: tuple[float, list[dict]] | None = None
+        self._siri_cache: dict[str, tuple[float, Any]] = {}
+        self.siri_available: bool | None = None
 
-    async def _get_json(self, url: str, params: dict | None = None) -> dict:
+    async def _get_json(
+        self,
+        url: str,
+        params: dict | None = None,
+        timeout: aiohttp.ClientTimeout = REQUEST_TIMEOUT,
+        quiet: bool = False,
+    ) -> dict:
         try:
             async with self._session.get(
                 url,
                 params=params,
                 auth=self._auth,
                 headers=HEADERS,
-                timeout=REQUEST_TIMEOUT,
+                timeout=timeout,
             ) as resp:
                 if resp.status != 200:
                     body = (await resp.text())[:300]
-                    _LOGGER.warning(
-                        "Réponse %s de %s : %s", resp.status, url, body
+                    _LOGGER.log(
+                        logging.DEBUG if quiet else logging.WARNING,
+                        "Réponse %s de %s : %s",
+                        resp.status,
+                        url,
+                        body,
                     )
                     if resp.status == 401:
                         raise TCLAuthError(
@@ -196,8 +237,10 @@ class TCLApiClient:
                         )
                     raise TCLApiError(f"Erreur HTTP {resp.status} sur {url}")
                 return await resp.json(content_type=None)
-        except aiohttp.ClientError as err:
-            raise TCLApiError(f"Erreur réseau : {err}") from err
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise TCLApiError(f"Erreur réseau : {err!r}") from err
+        except ValueError as err:  # JSON invalide
+            raise TCLApiError(f"Réponse illisible de {url} : {err}") from err
 
     @staticmethod
     def _values(data: dict) -> list[dict]:
@@ -281,6 +324,7 @@ class TCLApiClient:
             "metro": pick(("lignemf",)),
             "tram": pick(("lignetram",)),
             "bus": pick(("lignebus",)),
+            "alerts": pick(("alertetrafic",)),
         }
         # On ne garde que ce qui a été trouvé ; le reste passera par les défauts
         self.tables = {k: v for k, v in discovered.items() if v}
@@ -640,10 +684,16 @@ class TCLApiClient:
             if delay is None:
                 continue
             dest = str(_first(row, PASSAGE_DIRECTION_FIELDS) or "").strip()
+            dest_id = _first(row, PASSAGE_DEST_ID_FIELDS)
+            if dest and dest_id is not None:
+                # Sert à nommer les terminus des passages SIRI (qui n'ont
+                # qu'un identifiant d'arrêt) avec le libellé officiel.
+                self._dest_names[str(dest_id)] = dest
             if direction and not fuzzy_match(direction, dest):
                 rejected_directions.add(dest)
                 continue
             passage_dt = _parse_passage_time(time_text) if time_text else None
+            course = _first(row, PASSAGE_COURSE_FIELDS)
             departures.append(
                 {
                     "ligne": str(_first(row, PASSAGE_LINE_FIELDS) or ""),
@@ -651,8 +701,13 @@ class TCLApiClient:
                     "delai": delay,
                     "delai_texte": str(delay_text) if delay_text else f"{delay} min",
                     "heure": passage_dt.isoformat() if passage_dt else None,
+                    "heure_theorique": None,
+                    "retard": None,
+                    "annule": False,
                     "temps_reel": str(_first(row, PASSAGE_TYPE_FIELDS) or "").upper()
                     == "E",
+                    "source": "tcl",
+                    "course": str(course) if course else None,
                 }
             )
         if (
@@ -674,3 +729,155 @@ class TCLApiClient:
             )
         departures.sort(key=lambda d: d["delai"])
         return departures
+
+    # ------------------------------------------------------------------
+    # Temps réel étendu : SIRI Lite estimated-timetables
+    # ------------------------------------------------------------------
+    async def _async_destination_name(self, dest_id: str | None) -> str:
+        if not dest_id:
+            return ""
+        if dest_id in self._dest_names:
+            return self._dest_names[dest_id]
+        for stop in await self._async_get_all_stops():
+            if stop["id"] == dest_id:
+                return stop["name"]
+        return ""
+
+    async def async_get_siri_departures(
+        self,
+        stop_ids: list[str],
+        line_code: str,
+        direction: str | None = None,
+    ) -> list[dict]:
+        """Passages d'une ligne aux arrêts demandés, d'après le flux SIRI.
+
+        Contrairement à tclpassagearret (2 passages), on obtient tous les
+        passages des courses suivies, avec heure théorique, heure estimée
+        (=> retard) et suppressions. Lève TCLApiError si le flux est
+        indisponible : l'appelant doit le traiter comme facultatif.
+        """
+        key = line_code.strip().upper()
+        cached = self._siri_cache.get(key)
+        try:
+            if cached and time.monotonic() - cached[0] < SIRI_CACHE_SECONDS:
+                payload = cached[1]  # plusieurs arrêts suivis sur la même ligne
+            else:
+                payload = await self._get_json(
+                    SIRI_ET_URL,
+                    params={"LineRef": line_ref(line_code)},
+                    timeout=SIRI_TIMEOUT,
+                    quiet=True,
+                )
+                self._siri_cache[key] = (time.monotonic(), payload)
+        except TCLApiError:
+            if self.siri_available is not False:
+                _LOGGER.info(
+                    "Flux SIRI estimated-timetables indisponible pour l'instant "
+                    "(repli sur tclpassagearret)"
+                )
+            self.siri_available = False
+            raise
+        if self.siri_available is not True:
+            _LOGGER.debug("Flux SIRI estimated-timetables disponible")
+        self.siri_available = True
+
+        calls = parse_estimated_calls(payload, stop_ids, line_code)
+        now = dt_util.now()
+        departures: list[dict] = []
+        for call in calls:
+            when = call["estime"] or call["theorique"]
+            seconds = (when - now).total_seconds()
+            if seconds < -30:
+                continue  # déjà parti
+            dest = call["destination_nom"] or await self._async_destination_name(
+                call["destination_id"]
+            )
+            if direction and not (dest and fuzzy_match(direction, dest)):
+                continue
+            delay = max(0, int(seconds // 60))
+            retard = None
+            if call["estime"] is not None and call["theorique"] is not None:
+                retard = round(
+                    (call["estime"] - call["theorique"]).total_seconds() / 60
+                )
+            local = when.astimezone(TZ_LYON)
+            departures.append(
+                {
+                    "ligne": call["ligne"] or line_code,
+                    "destination": dest,
+                    "delai": delay,
+                    "delai_texte": "Supprimé"
+                    if call["annule"]
+                    else ("Proche" if delay == 0 else f"{delay} min"),
+                    "heure": local.isoformat(),
+                    "heure_theorique": call["theorique"].astimezone(TZ_LYON).isoformat()
+                    if call["theorique"]
+                    else None,
+                    "retard": retard,
+                    "annule": call["annule"],
+                    "temps_reel": call["estime"] is not None,
+                    "source": "siri",
+                    "course": call["course"],
+                }
+            )
+        _LOGGER.debug(
+            "SIRI : %d passages ligne %s aux arrêts %s (%d retenus)",
+            len(calls),
+            line_code,
+            stop_ids,
+            len(departures),
+        )
+        return departures
+
+    # ------------------------------------------------------------------
+    # Alertes trafic
+    # ------------------------------------------------------------------
+    async def _async_all_alerts(self) -> list[dict]:
+        """Table complète des alertes (quelques centaines de lignes), en cache."""
+        if (
+            self._alerts_cache
+            and time.monotonic() - self._alerts_cache[0] < ALERTS_CACHE_SECONDS
+        ):
+            return self._alerts_cache[1]
+        table = await self.async_table("alerts")
+        rows = await self._async_fetch_table_rows(table, page_size=500)
+        self._alerts_cache = (time.monotonic(), rows)
+        return rows
+
+    async def async_get_alerts(self, line_code: str) -> list[dict]:
+        """Alertes trafic EN COURS pour une ligne, les plus graves d'abord."""
+        target = line_code.strip().upper()
+        now = dt_util.now()
+        alerts: dict[str, dict] = {}
+        for row in await self._async_all_alerts():
+            lines = {
+                str(row.get(field) or "").strip().upper()
+                for field in ("ligne_cli", "ligne_com")
+            }
+            lines.update(
+                token.strip().upper()
+                for token in re.split(r"[,;| ]+", str(row.get("listeobjet") or ""))
+            )
+            if target not in lines:
+                continue
+            start = _parse_passage_time(row["debut"]) if row.get("debut") else None
+            end = _parse_passage_time(row["fin"]) if row.get("fin") else None
+            if (start and start > now) or (end and end < now):
+                continue
+            title = str(row.get("titre") or "").strip().rstrip(" -")
+            message = re.sub(r"\s+", " ", str(row.get("message") or "")).strip()
+            key = f"{title}|{message}"
+            if key in alerts:
+                continue  # même alerte déclinée par sens/ligne commerciale
+            alerts[key] = {
+                "type": str(row.get("type") or "Information"),
+                "cause": row.get("cause"),
+                "titre": title or message[:80],
+                "message": message,
+                "debut": start.isoformat() if start else None,
+                "fin": end.isoformat() if end else None,
+            }
+        return sorted(
+            alerts.values(),
+            key=lambda a: (-alert_level(a), a["debut"] or ""),
+        )

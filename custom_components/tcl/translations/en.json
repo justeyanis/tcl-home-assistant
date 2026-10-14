@@ -50,9 +50,13 @@
     "step": {
       "init": {
         "title": "TCL options",
+        "description": "Changing the direction here avoids deleting and re-creating the entry.",
         "data": {
+          "direction": "Direction",
           "scan_interval": "Refresh interval (seconds)",
-          "departure_count": "Number of departures (entities created)"
+          "departure_count": "Number of departures (entities created)",
+          "realtime_siri": "Extended real time (SIRI feed: every tracked trip, delays, cancellations)",
+          "traffic_alerts": "Line traffic alerts (\"Disruption\" sensor + banner on the card)"
         }
       }
     }
@@ -64,6 +68,18 @@
         "funiculaire": "Funicular",
         "tram": "Tram",
         "bus": "Bus"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_departure": {
+        "name": "Next departure"
+      }
+    },
+    "binary_sensor": {
+      "disruption": {
+        "name": "Disruption"
       }
     }
   }
