@@ -39,6 +39,7 @@
  *   show_delay: true                    # retard (+3) et passages supprimés
  *   show_alerts: true                   # bandeau défilant des alertes trafic
  *   show_line: auto                     # badge de ligne par rangée : auto | true | false
+ *   show_approach: true                 # tram/bus : « À L'APPROCHE » puis « À QUAI »
  *   header: ""                          # direction forcée (déf.: config)
  *   header_prefix: "Direction"
  *   via: ""                             # sous-texte droite, multi-ligne
@@ -90,6 +91,11 @@ const ICON_URL = (code) =>
   )}.svg`;
 
 /* Face avant de rame (découpes transparentes), rails croisés */
+function ALERT_ICON_PATH() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor"
+    d="M12 2 1 21h22L12 2Zm1 15h-2v2h2v-2Zm0-7h-2v5h2v-5Z"/></svg>`;
+}
+
 const PICTO = `
   <svg viewBox="0 0 32 35" xmlns="http://www.w3.org/2000/svg">
     <path fill="currentColor" fill-rule="evenodd" d="
@@ -104,6 +110,83 @@ const PICTO = `
       d="M11.2 24.6 L3.6 33.4 M20.8 24.6 L28.4 33.4 M2.2 31.4 L29.8 31.4"/>
   </svg>`;
 
+/* Tramway Citadis 302 de Lyon, vue de face (couleur = LED du panneau) */
+const TRAM_PICTO = `
+  <svg viewBox="40 40 432 440" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <path d="M256 98V78M256 78l-36-28M256 78l36-28M166 58q10-8 26-8h128q16 0 26 8"
+      fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round"
+      stroke-linejoin="round"/>
+    <rect fill="currentColor" x="90" y="163" width="36" height="16" rx="8"/>
+    <rect fill="currentColor" x="386" y="163" width="36" height="16" rx="8"/>
+    <path fill="currentColor" fill-rule="evenodd" d="M256 96C310 96 352 102 377 118C390 127 394 150 396 172C400 205 401 240 401 270C401 320 400 360 399 390C398 420 396 440 388 451C380 464 372 470 364 470H148C140 470 132 464 124 451C116 440 114 420 113 390C112 360 111 320 111 270C111 240 112 205 116 172C118 150 122 127 135 118C160 102 202 96 256 96ZM150 334C163 240 201 163 256 163C311 163 349 240 362 334Q256 402 150 334ZM122 184Q150 196 161 228C150 258 139 300 135 332L139 364L122 358ZM390 184Q362 196 351 228C362 258 373 300 377 332L373 364L390 358ZM153 381a15 10 0 1 0 30 0a15 10 0 1 0-30 0ZM329 381a15 10 0 1 0 30 0a15 10 0 1 0-30 0ZM176 446a7 7 0 1 0 14 0a7 7 0 1 0-14 0ZM322 446a7 7 0 1 0 14 0a7 7 0 1 0-14 0Z"/>
+  </svg>`;
+
+/* Bus vue de face : girouette, pare-brise, phares, rétroviseurs */
+const BUS_PICTO = `
+  <svg viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <path fill="currentColor" fill-rule="evenodd" d="
+      M7 1.5 H25 Q29 1.5 29 5.5 V30 Q29 32 27 32 H5 Q3 32 3 30 V5.5 Q3 1.5 7 1.5 Z
+      M9.5 3.4 H22.5 V5.6 H9.5 Z
+      M6.2 7.5 H25.8 Q26.4 7.5 26.4 8.1 V18.4 Q26.4 19 25.8 19 H6.2 Q5.6 19 5.6 18.4 V8.1 Q5.6 7.5 6.2 7.5 Z
+      M8 25 a2.2 2.2 0 1 0 4.4 0 a2.2 2.2 0 1 0 -4.4 0 Z
+      M19.6 25 a2.2 2.2 0 1 0 4.4 0 a2.2 2.2 0 1 0 -4.4 0 Z
+      M13.5 27.4 H18.5 V28.8 H13.5 Z"/>
+    <rect fill="currentColor" x="5.5" y="31.5" width="5" height="4" rx="1"/>
+    <rect fill="currentColor" x="21.5" y="31.5" width="5" height="4" rx="1"/>
+    <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+      d="M3 8.5 H1.2 V14.5 M29 8.5 H30.8 V14.5"/>
+  </svg>`;
+
+const vehiclePicto = (mode) =>
+  mode === "tram" ? TRAM_PICTO : mode === "bus" ? BUS_PICTO : PICTO;
+
+/* Icônes des alertes selon la cause */
+const CAUSE_ICONS = {
+  travaux: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor"
+    d="M10.6 2h2.8l1.2 4H9.4l1.2-4Zm-1.8 6h6.4l1.1 4H7.7l1.1-4Zm-1.7 6h9.8l1.1 4H6l1.1-4ZM3 20h18v2H3v-2Z"/></svg>`,
+  social: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor"
+    d="M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 19c0-3.3 2.7-6 6-6s6 2.7 6 6v1H2v-1Zm13.5 1v-1c0-1.9-.7-3.6-1.9-4.9A5.5 5.5 0 0 1 22 19v1h-6.5Z"/></svg>`,
+  incident: ALERT_ICON_PATH(),
+  info: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor"
+    d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-6h2v6Zm0-8h-2V7h2v2Z"/></svg>`,
+};
+
+function causeIcon(alert) {
+  const text = `${alert.cause || ""} ${alert.titre || ""}`.toLowerCase();
+  if (/travaux|chantier|ascenseur|escalator|maintenance/.test(text)) return CAUSE_ICONS.travaux;
+  if (/social|grève|greve|manifest/.test(text)) return CAUSE_ICONS.social;
+  if (/information/i.test(alert.type || "")) return CAUSE_ICONS.info;
+  return CAUSE_ICONS.incident;
+}
+
+/* Gravité : 3 majeure, 2 perturbation, 1 travaux/inconnu, 0 information */
+function alertLevel(alert) {
+  const t = String(alert.type || "").trim().toLowerCase();
+  if (t.includes("majeure")) return 3;
+  if (t.startsWith("perturbation")) return 2;
+  if (t.startsWith("information")) return 0;
+  return 1;
+}
+
+const ALERT_LABELS = ["Info trafic", "Travaux", "Perturbation", "Perturbation majeure"];
+
+function shortDate(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const day = d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+  const time = hhmm(d);
+  return time === "00:00" ? day : `${day} ${time}`;
+}
+
+function alertPeriod(alert) {
+  const from = alert.debut ? shortDate(alert.debut) : "";
+  const to = alert.fin ? shortDate(alert.fin) : "";
+  if (from && to) return `Du ${from} au ${to}`;
+  if (from) return `Depuis le ${from}`;
+  if (to) return `Jusqu'au ${to}`;
+  return "";
+}
+
 /* Pastille « temps réel » (ondes, comme sur l'appli TCL) */
 const RT_ICON = `
   <svg class="rt" viewBox="0 0 16 16" role="img" aria-label="temps réel">
@@ -113,9 +196,7 @@ const RT_ICON = `
     <circle cx="3.6" cy="12.4" r="2" fill="currentColor"/>
   </svg>`;
 
-const ALERT_ICON = `
-  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor"
-    d="M12 2 1 21h22L12 2Zm1 15h-2v2h2v-2Zm0-7h-2v5h2v-5Z"/></svg>`;
+const ALERT_ICON = ALERT_ICON_PATH();
 
 const DEFAULTS = {
   count: 3,
@@ -131,6 +212,7 @@ const DEFAULTS = {
   show_delay: true,
   show_alerts: true,
   show_line: "auto",
+  show_approach: true,
   title: "",
   header: "",
   header_prefix: "Direction",
@@ -280,7 +362,8 @@ class TclBivCard extends HTMLElement {
         const key = `${d.ligne}|${d.destination}|${d.heure || d.delai}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        deps.push({ ...d, delai });
+        const secs = d.heure ? (new Date(d.heure) - now) / 1000 : null;
+        deps.push({ ...d, delai, secs });
       }
     }
     deps.sort((a, b) => a.delai - b.delai);
@@ -300,9 +383,23 @@ class TclBivCard extends HTMLElement {
 
   /* Délai affiché : picto à quai, HH:MM au-delà d'une heure, sinon minutes,
      + pastille temps réel et retard. */
-  _timeHtml(d, picto, atStopText) {
+  _timeHtml(d, picto, atStopText, approach = false) {
     const c = this._config;
     if (d.annule) return `<span class="cancel">SUPPRIMÉ</span>`;
+    // Tram/bus suivi en temps réel : états des BIV, déduits de l'heure
+    // estimée par le SAE (pas de détection physique du véhicule).
+    if (approach && c.show_approach && d.temps_reel && d.secs != null) {
+      if (d.secs < 60) {
+        return `<span class="t-state quai">${
+          c.show_picto ? picto : ""
+        }<span class="blink">À&#160;QUAI</span></span>`;
+      }
+      if (d.secs < 150) {
+        return `<span class="t-state appr">${
+          c.show_picto ? picto.replace(" blink", "") : ""
+        }<span>À&#160;L'APPROCHE</span></span>`;
+      }
+    }
     let html;
     if (d.delai === 0) {
       html = c.show_picto ? picto : atStopText;
@@ -329,7 +426,7 @@ class TclBivCard extends HTMLElement {
 
   _alertsHtml(alerts) {
     if (!alerts.length) return "";
-    const major = alerts.some((a) => /majeure/i.test(a.type || ""));
+    const level = Math.max(...alerts.map(alertLevel));
     const text = alerts
       .map((a) => {
         const msg = (a.message || "").slice(0, 220);
@@ -341,13 +438,35 @@ class TclBivCard extends HTMLElement {
       0
     );
     const dur = Math.max(12, Math.round(chars * 0.16));
+    const open = !!this._alertsOpen;
+    const detail = open
+      ? `<div class="a-detail">${alerts
+          .map(
+            (a) => `
+            <div class="a-item sev-${alertLevel(a)}">
+              <span class="a-cause">${causeIcon(a)}</span>
+              <div class="a-body">
+                <div class="a-head">
+                  <span class="a-type">${esc(ALERT_LABELS[alertLevel(a)])}</span>
+                  <span class="a-when">${esc(alertPeriod(a))}</span>
+                </div>
+                <div class="a-title">${esc(a.titre)}</div>
+                ${a.message && a.message !== a.titre ? `<div class="a-msg">${esc(a.message)}</div>` : ""}
+              </div>
+            </div>`
+          )
+          .join("")}</div>`
+      : "";
     return `
-      <div class="alerts ${major ? "major" : ""}" title="${esc(
-        alerts.map((a) => a.titre).join(" • ")
-      )}">
-        <span class="a-ico">${ALERT_ICON}</span>
+      <div class="alerts sev-${level} ${open ? "open" : ""}" role="button" tabindex="0"
+           aria-expanded="${open}" title="${open ? "Masquer" : "Afficher"} le détail des alertes">
+        <span class="a-chip">${ALERT_ICON}<span>${esc(ALERT_LABELS[level])}</span>${
+          alerts.length > 1 ? `<span class="a-count">${alerts.length}</span>` : ""
+        }</span>
         <div class="a-track"><span class="a-text" style="animation-duration:${dur}s">${text}</span></div>
-      </div>`;
+        <span class="a-chev" aria-hidden="true">▾</span>
+      </div>
+      ${detail}`;
   }
 
   _label(i) {
@@ -386,6 +505,28 @@ class TclBivCard extends HTMLElement {
 
     const card = this.shadowRoot.querySelector(".biv");
     if (card) card.addEventListener("click", () => this._moreInfo());
+
+    // Bandeau d'alertes : clic = déplier/replier le détail (pas la fiche)
+    const banner = this.shadowRoot.querySelector(".alerts");
+    if (banner) {
+      const toggle = (ev) => {
+        ev.stopPropagation();
+        this._alertsOpen = !this._alertsOpen;
+        this._lastHtml = null;
+        this._render();
+        this.shadowRoot.querySelector(".alerts")?.focus();
+      };
+      banner.addEventListener("click", toggle);
+      banner.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          toggle(ev);
+        }
+      });
+    }
+    this.shadowRoot
+      .querySelector(".a-detail")
+      ?.addEventListener("click", (ev) => ev.stopPropagation());
 
     const sel = this.shadowRoot.getElementById("station");
     if (sel) {
@@ -489,7 +630,7 @@ class TclBivCard extends HTMLElement {
             // à la place du délai, et clignote.
             const value = this._timeHtml(
               d,
-              `<span class="m-rowpicto blink">${PICTO}</span>`,
+              `<span class="m-rowpicto blink">${vehiclePicto(entities[0].attributes.mode)}</span>`,
               "proche"
             );
             const theo = c.show_realtime && d.temps_reel === false && !d.annule;
@@ -540,10 +681,12 @@ class TclBivCard extends HTMLElement {
     const rows = deps.length
       ? deps
           .map((d) => {
+            const picto = vehiclePicto(entities[0].attributes.mode);
             const delay = this._timeHtml(
               d,
-              `<span class="t-rowpicto blink">${PICTO}</span>`,
-              "&gt;&gt;"
+              `<span class="t-rowpicto blink">${picto}</span>`,
+              "&gt;&gt;",
+              true
             );
             const theo = c.show_realtime && d.temps_reel === false && !d.annule;
             const badge = multi
@@ -572,7 +715,7 @@ class TclBivCard extends HTMLElement {
         : "";
 
     return `
-      <div class="biv tram" style="${this._cssVars()}">
+      <div class="biv tram" style="${this._cssVars()};--tcl-line:${esc(color)}">
         ${header}
         <div class="t-screen">
           <div class="t-inner">${rows}${footer}</div>
@@ -596,11 +739,30 @@ const CSS = `
     max-width: calc(100% - 32px);
   }
   .biv {
-    margin: 12px 16px 16px; border-radius: 12px; overflow: hidden;
-    border: 2px solid #1a1a1a;
-    box-shadow: 0 6px 18px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.15);
+    margin: 12px 16px 16px; border-radius: 14px; overflow: hidden;
+    border: 1px solid #000; padding: 5px;
+    /* boîtier en aluminium anodisé */
+    background: linear-gradient(160deg, #3a3e44, #1d2024 45%, #121417);
+    box-shadow: 0 8px 22px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.18),
+                inset 0 -1px 0 rgba(0,0,0,.6);
     line-height: 1.15; cursor: pointer;
     container-type: inline-size; container-name: biv;
+    transition: box-shadow .2s ease, transform .2s ease;
+  }
+  .biv:hover { box-shadow: 0 12px 28px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.18); }
+  .biv > :first-child { border-radius: 9px 9px 0 0; }
+  .biv > :last-child { border-radius: 0 0 9px 9px; }
+  .biv > :only-child { border-radius: 9px; }
+
+  /* verre de l'écran : reflet + trame fine */
+  .m-screen, .t-screen { position: relative; overflow: hidden; }
+  .m-screen::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,.022) 0 1px, transparent 1px 3px);
+  }
+  .m-screen::after, .t-screen::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(165deg, rgba(255,255,255,.075), rgba(255,255,255,0) 38%);
   }
 
   /* temps réel, retards, suppressions */
@@ -622,25 +784,76 @@ const CSS = `
              font-family: Arial, Helvetica, sans-serif; }
   .t-row .rowline { flex: none; margin-right: 0; }
 
-  /* bandeau d'alertes trafic (défilant) */
+  /* bandeau d'alertes trafic : étiquette + texte LED défilant */
   .alerts {
-    display: flex; align-items: center; gap: 8px; padding: 6px 12px;
-    background: #f2a900; color: #111; font-family: Arial, Helvetica, sans-serif;
-    font-size: 13px; border-top: 2px solid #b97f00; overflow: hidden;
+    --sev: #f2a900; --sev-ink: #111; --sev-led: #ffc23d;
+    display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 6px;
+    background: #0b0b0c; border-top: 1px solid #2a2a2a;
+    font-family: Arial, Helvetica, sans-serif; font-size: 13px; overflow: hidden;
+    cursor: pointer; outline: none;
   }
-  .alerts.major { background: #d6261c; color: #fff; border-top-color: #8f160f; }
-  .a-ico { flex: none; width: 18px; height: 18px; display: inline-flex; }
-  .a-ico svg { width: 100%; height: 100%; }
+  .alerts:focus-visible { box-shadow: inset 0 0 0 2px var(--sev); }
+  .alerts.sev-0 { --sev: #2f7fd1; --sev-ink: #fff; --sev-led: #9fcbff; }
+  .alerts.sev-1 { --sev: #f2a900; --sev-ink: #111; --sev-led: #ffc23d; }
+  .alerts.sev-2 { --sev: #ef6c00; --sev-ink: #fff; --sev-led: #ff9a3d; }
+  .alerts.sev-3 { --sev: #d6261c; --sev-ink: #fff; --sev-led: #ff5a4d; }
+  .a-chip {
+    flex: none; display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 8px 4px 6px; border-radius: 5px;
+    background: var(--sev); color: var(--sev-ink);
+    font-weight: 800; font-size: 11px; letter-spacing: .6px; text-transform: uppercase;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--sev) 45%, transparent);
+  }
+  .alerts.sev-3 .a-chip { animation: tcl-pulse 1.6s ease-in-out infinite; }
+  @keyframes tcl-pulse { 50% { box-shadow: 0 0 2px transparent; filter: brightness(1.15); } }
+  .a-chip svg { width: 15px; height: 15px; }
+  .a-count { margin-left: 2px; min-width: 16px; height: 16px; padding: 0 3px;
+             border-radius: 8px; background: rgba(0,0,0,.28); color: inherit;
+             display: inline-flex; align-items: center; justify-content: center;
+             font-size: 10px; letter-spacing: 0; }
   .a-track { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
+             color: var(--sev-led); font-weight: 700; letter-spacing: .4px;
+             text-shadow: 0 0 6px color-mix(in srgb, var(--sev-led) 60%, transparent);
              mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
   .a-text { display: inline-block; padding-left: 100%;
             animation: tcl-marquee 20s linear infinite; }
-  .a-sep { margin: 0 14px; opacity: .6; }
+  .a-text b { color: #fff; text-shadow: 0 0 6px color-mix(in srgb, var(--sev-led) 70%, transparent); }
+  .a-sep { margin: 0 14px; opacity: .55; }
+  .a-chev { flex: none; color: #888; font-size: 14px; transition: transform .2s ease; }
+  .alerts.open .a-chev { transform: rotate(180deg); }
   @keyframes tcl-marquee { from { transform: translateX(0) } to { transform: translateX(-100%) } }
+
+  /* détail des alertes (dépliable) */
+  .a-detail { background: #141518; border-top: 1px solid #2a2a2a; padding: 8px;
+              display: flex; flex-direction: column; gap: 6px; cursor: default;
+              font-family: Arial, Helvetica, sans-serif; color: #e8e8e8; }
+  .a-item { --sev: #f2a900; display: flex; gap: 10px; padding: 9px 10px;
+            border-radius: 8px; background: #1d1f23;
+            border-left: 4px solid var(--sev); }
+  .a-item.sev-0 { --sev: #2f7fd1; }
+  .a-item.sev-2 { --sev: #ef6c00; }
+  .a-item.sev-3 { --sev: #d6261c; background: #2a1715; }
+  .a-cause { flex: none; width: 22px; height: 22px; color: var(--sev); margin-top: 1px; }
+  .a-cause svg { width: 100%; height: 100%; }
+  .a-body { flex: 1; min-width: 0; }
+  .a-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+            margin-bottom: 3px; }
+  .a-type { font-size: 10px; font-weight: 800; letter-spacing: .7px;
+            text-transform: uppercase; color: var(--sev); }
+  .a-when { font-size: 11px; color: #9aa0a6; }
+  .a-title { font-size: 14px; font-weight: 700; line-height: 1.25; }
+  .a-msg { margin-top: 3px; font-size: 12.5px; line-height: 1.4; color: #c4c7cc; }
+
+  /* tram/bus : états « à l'approche » / « à quai » */
+  .t-state { display: inline-flex; align-items: center; gap: 6px;
+             font-size: .8em; letter-spacing: 1px; }
+  .t-state .t-rowpicto { width: 1.75em; height: 1.75em; }
+  .t-state.quai { color: #fff2c4; }
+
   @media (prefers-reduced-motion: reduce) {
     .a-track { white-space: normal; mask-image: none; }
     .a-text { animation: none; padding-left: 0; }
-    .blink, .rt { animation: none; }
+    .blink, .rt, .a-chip { animation: none !important; }
   }
 
   /* pictogramme de ligne (officiel + repli) */
@@ -655,8 +868,9 @@ const CSS = `
   /* ─── panneau métro / funiculaire ─── */
   .m-header {
     display: flex; align-items: center; gap: 12px; padding: 10px 14px;
-    background: var(--tcl-header-bg, linear-gradient(#f8ce1e, #eab800));
+    background: var(--tcl-header-bg, linear-gradient(#fbd632, #f2c200 55%, #e4b000));
     border-bottom: 3px solid #c99700;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.45);
     color: #111; font-family: Arial, Helvetica, sans-serif;
   }
   .m-dir { flex: 1 1 auto; min-width: 0; }
@@ -677,7 +891,8 @@ const CSS = `
   }
   .m-rows { flex: 1 1 auto; min-width: 0; }
   .m-row { display: flex; align-items: center; font-size: 24px;
-           font-weight: 700; padding: 2px 0; min-height: 32px; }
+           font-weight: 700; padding: 2px 0; min-height: 32px; position: relative; }
+  .m-row + .m-row { border-top: 1px solid rgba(255,255,255,.05); }
   .m-lbl { color: var(--tcl-label, #ff7a1a); min-width: 130px;
            text-shadow: 0 0 6px; }
   .m-val { color: var(--tcl-value, #3dc473); text-shadow: 0 0 6px;
@@ -691,8 +906,10 @@ const CSS = `
   /* ─── panneau tram / bus (LED ambre, matrice de points) ─── */
   .t-header {
     display: flex; align-items: center; gap: 12px; padding: 9px 14px;
-    background: var(--tcl-header-bg, linear-gradient(#585e64, #43484d));
+    background: var(--tcl-header-bg, linear-gradient(#5d636a, #3f4449));
     border-bottom: 2px solid #2e3236;
+    box-shadow: inset 5px 0 0 var(--tcl-line, transparent),
+                inset 0 1px 0 rgba(255,255,255,.12);
     color: #f0f0f0;
   }
   .t-dir { font-size: 16px; font-family: Arial, Helvetica, sans-serif;
@@ -710,6 +927,7 @@ const CSS = `
     background-image: radial-gradient(circle, rgba(0,0,0,0) 0 36%, rgba(6,6,6,.25) 42%);
     background-size: 3px 3px;
   }
+  .t-row + .t-row { border-top: 1px dotted rgba(255,166,26,.14); }
   .t-row {
     display: flex; align-items: center; gap: 12px; padding: 5px 0;
     font-family: Arial, Helvetica, sans-serif;
@@ -743,6 +961,7 @@ const CSS = `
     .lbadge { height: 24px; min-width: 24px; font-size: 13px; }
     .t-row { font-size: 16px; letter-spacing: 1px; gap: 8px; }
     .t-inner { padding: 10px 12px; }
+    .t-state { gap: 4px; letter-spacing: .5px; }
   }
   @container biv (max-width: 340px) {
     .m-screen { gap: 10px; padding: 10px 10px; }
@@ -750,6 +969,7 @@ const CSS = `
     .m-row { font-size: 16px; }
     .m-lbl { min-width: 76px; }
     .t-row { font-size: 15px; letter-spacing: .5px; }
+    .a-chip { font-size: 9.5px; letter-spacing: .2px; padding: 3px 6px 3px 4px; }
   }
 
   @keyframes tcl-blink { 0%,49% {opacity:1} 50%,100% {opacity:.15} }
@@ -767,6 +987,7 @@ const ED_TOGGLES = [
   ["show_realtime", "Pastille temps réel"],
   ["show_delay", "Retards et suppressions"],
   ["show_alerts", "Alertes trafic"],
+  ["show_approach", "À l'approche / à quai (tram, bus)"],
   ["show_selector", "Menu des stations"],
 ];
 

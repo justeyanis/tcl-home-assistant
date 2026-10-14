@@ -90,7 +90,8 @@ Toutes les options YAML :
 | `show_picto` | `true` | picto véhicule : uniquement quand la rame est à quai, à la place du délai (clignote) |
 | `show_realtime` | `true` | pastille « ondes » sur les passages suivis en temps réel ; horaires purement théoriques atténués |
 | `show_delay` | `true` | badge de retard (`+3`) et passages **SUPPRIMÉ** barrés |
-| `show_alerts` | `true` | bandeau défilant des alertes trafic (rouge si perturbation majeure) |
+| `show_alerts` | `true` | bandeau des alertes trafic : étiquette colorée selon la gravité (info / travaux / perturbation / majeure) + texte défilant ; **un clic le déplie** (cause, période « du … au … », message complet) |
+| `show_approach` | `true` | tram/bus suivis en temps réel : « À L'APPROCHE » (< 2 min 30) puis « À QUAI » (< 1 min) avec le picto du véhicule (Citadis pour le tram, bus de face pour le bus) |
 | `show_line` | `auto` | badge de ligne sur chaque rangée : `auto` (si plusieurs lignes), `true`, `false` |
 | `line_icon` | `official` | pictogramme de ligne : `official` (SVG tcl.fr), `badge` (pastille), `none` |
 | `header` | direction configurée | texte principal du bandeau |
@@ -119,9 +120,11 @@ Sans `style`, le rendu s'adapte au mode : **métro/funiculaire** → panneau jau
 
 Entre deux rafraîchissements de l'API, la carte recalcule les délais côté client à partir de l'heure de passage : un départ disparaît **30 secondes avant son heure réelle**. Toute la carte est en Arial, sans italique, et la direction s'affiche toujours en entier (retour à la ligne si besoin).
 
+« À l'approche » et « à quai » sont déduits de l'heure estimée par le SAE TCL (comme sur les BIV) : aucune donnée publique ne signale physiquement la présence d'un véhicule à quai, ni la composition des rames (simple ou unité multiple sur le métro B).
+
 Pratique au quotidien :
 
-- **un clic** sur le panneau ouvre le détail de l'entité (historique, attributs) ;
+- **un clic** sur le panneau ouvre le détail de l'entité (historique, attributs) ; un clic sur le bandeau d'alertes en affiche le détail ;
 - **plusieurs lignes au même arrêt** (ex. `entities: [sensor.tcl_c3_cordeliers_0, sensor.tcl_c13_cordeliers_0]`) : les départs sont fusionnés et chaque rangée porte le badge de sa ligne ;
 - la carte se **réduit automatiquement** sur mobile / colonnes étroites et occupe toute la largeur en vue « sections » ;
 - les animations (défilement, clignotement) respectent le réglage système « réduire les animations ».
