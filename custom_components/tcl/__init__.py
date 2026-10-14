@@ -17,6 +17,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
@@ -32,6 +33,9 @@ CARD_URL_BASE = "/tcl-biv-card"
 CARD_FILENAME = "tcl-biv-card.js"
 
 TCLConfigEntry = ConfigEntry
+
+# Configuration uniquement via l'interface (pas de YAML)
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
