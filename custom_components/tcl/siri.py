@@ -93,6 +93,23 @@ def _journeys(payload: Any) -> Iterator[dict]:
                     yield journey
 
 
+def summarize(payload: Any) -> dict:
+    """Résumé d'un payload, pour diagnostiquer une absence de passages."""
+    journeys = list(_journeys(payload))
+    stops: list[str] = []
+    for journey in journeys[:3]:
+        estimated = journey.get("EstimatedCalls") or {}
+        for call in _as_list(estimated.get("EstimatedCall"))[:4]:
+            if isinstance(call, dict):
+                ref = _value(call.get("StopPointRef"))
+                if ref and ref not in stops:
+                    stops.append(ref)
+    lines = sorted(
+        {parse_ref(_value(j.get("LineRef"))) or "?" for j in journeys}
+    )
+    return {"courses": len(journeys), "lignes": lines[:5], "exemples_arrets": stops[:6]}
+
+
 def parse_estimated_calls(
     payload: Any, stop_ids: Iterable[str], line_code: str | None = None
 ) -> list[dict]:

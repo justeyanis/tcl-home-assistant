@@ -206,7 +206,9 @@ logger:
     custom_components.tcl: debug
 ```
 
-2. Lancez le script de diagnostic (Python 3.9+, aucune dépendance) qui vérifie chaque maillon — station, temps réel, filtre de direction, GTFS, flux SIRI et alertes trafic :
+2. **Temps réel étendu (SIRI) absent ?** Outils de développement → États → entité `#0` → attribut `temps_reel_siri` : `etat` indique la cause (`erreur` + détail HTTP, `aucune course suivie sur la ligne`, `aucun passage à ces arrêts` avec des exemples d'identifiants reçus…).
+
+3. Lancez le script de diagnostic (Python 3.9+, aucune dépendance) qui vérifie chaque maillon — station, temps réel, filtre de direction, GTFS, flux SIRI et alertes trafic :
 
 ```bash
 python diagnose.py --station "Charpennes" --ligne B --direction "St-Genis"
